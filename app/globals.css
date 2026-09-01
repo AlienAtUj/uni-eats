@@ -1,0 +1,89 @@
+@import 'tailwindcss';
+@import 'tw-animate-css';
+@import 'shadcn/tailwind.css';
+
+@custom-variant dark (&:is(.dark *));
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-brand: var(--brand);
+  --color-brand-foreground: var(--brand-foreground);
+  --font-sans: var(--font-jakarta), ui-sans-serif, system-ui, sans-serif;
+  --radius-sm: calc(var(--radius) * 0.6);
+  --radius-md: calc(var(--radius) * 0.8);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) * 1.4);
+  --radius-2xl: calc(var(--radius) * 1.8);
+  --radius-3xl: calc(var(--radius) * 2.4);
+}
+
+:root {
+  color-scheme: light;
+  --radius: 0.875rem;
+
+  /* warm light neutral background */
+  --background: oklch(0.975 0.006 95);
+  --foreground: oklch(0.205 0.012 260);
+
+  --card: oklch(1 0 0);
+  --card-foreground: oklch(0.205 0.012 260);
+  --popover: oklch(1 0 0);
+  --popover-foreground: oklch(0.205 0.012 260);
+
+  /* UniEats green */
+  --primary: oklch(0.55 0.135 150);
+  --primary-foreground: oklch(0.99 0.01 120);
+
+  --secondary: oklch(0.955 0.008 120);
+  --secondary-foreground: oklch(0.26 0.012 260);
+
+  --muted: oklch(0.955 0.006 110);
+  --muted-foreground: oklch(0.52 0.012 260);
+
+  /* UniEats orange accent */
+  --accent: oklch(0.72 0.16 55);
+  --accent-foreground: oklch(0.2 0.02 60);
+
+  --brand: oklch(0.55 0.135 150);
+  --brand-foreground: oklch(0.99 0.01 120);
+
+  --destructive: oklch(0.585 0.2 25);
+
+  --border: oklch(0.915 0.006 110);
+  --input: oklch(0.915 0.006 110);
+  --ring: oklch(0.55 0.135 150);
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+  body {
+    @apply bg-background text-foreground;
+  }
+  /* hide scrollbars on horizontal scroll rows */
+  .no-scrollbar::-webkit-scrollbar {
+    display: none;
+  }
+  .no-scrollbar {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+  }
+}
