@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { campuses, formatPrice } from '@/lib/data'
 import { useStore } from './store'
 import { BottomSheet } from './sheet'
@@ -24,10 +24,28 @@ const pickupTimes = [
 ]
 
 const paymentMethods = [
-  'Campus Card •••• 4821',
-  'Visa •••• 6390',
-  'Apple Pay',
+  'Paystack (Card / EFT / SnapScan)',
+  'Cash on Pickup',
 ]
+
+declare global {
+  interface Window {
+    PaystackPop?: {
+      setup: (options: {
+        key: string
+        email: string
+        amount: number
+        currency?: string
+        ref?: string
+        metadata?: Record<string, any>
+        callback: (response: { reference: string; status: string }) => void
+        onClose: () => void
+      }) => {
+        openIframe: () => void
+      }
+    }
+  }
+}
 
 export function CheckoutScreen() {
   const {
@@ -40,10 +58,127 @@ export function CheckoutScreen() {
     paymentMethod,
     setPaymentMethod,
     placeOrder,
+    user,
   } = useStore()
   const [sheet, setSheet] = useState<'time' | 'payment' | null>(null)
+  const [isProcessingPayment, setIsProcessingPayment] = useState(false)
+  const [paymentError, setPaymentError] = useState<string | null>(null)
+
   const campus = campuses.find((c) => c.id === campusId)!
   const total = subtotal + SERVICE_FEE
+
+  // Load official Paystack Inline V1 script safely
+  useEffect(() => {
+    if (typeof window !== 'undefined' && !window.PaystackPop) {
+      const existingScript = document.getElementById('paystack-inline-script')
+      if (!existingScript) {
+        const script = document.createElement('script')
+        script.id = 'paystack-inline-script'
+        script.src = 'https://js.paystack.co/v1/inline.js'
+        script.async = true
+        document.body.appendChild(script)
+      }
+    }
+  }, [])
+
+  const handleCheckout = async () => {
+    setPaymentError(null)
+
+    // If student chose Cash on Pickup, place order directly marked as cash_on_pickup
+    if (paymentMethod === 'Cash on Pickup') {
+      setIsProcessingPayment(true)
+      try {
+        await placeOrder({
+          paymentStatus: 'cash_on_pickup',
+          paymentChannel: 'cash',
+        })
+      } finally {
+        setIsProcessingPayment(false)
+      }
+      return
+    }
+
+    // Paystack Online Payment Flow
+    const publicKey = process.env.NEXT_PUBLIC_PAYSTACK_PUBLIC_KEY
+    if (!publicKey) {
+      setPaymentError(
+        'Paystack Public Key (NEXT_PUBLIC_PAYSTACK_PUBLIC_KEY) is missing in .env.local. Please add your Paystack keys or select Cash on Pickup.'
+      )
+      return
+    }
+
+    if (!window.PaystackPop) {
+      setPaymentError('Paystack payment library is still loading. Please try again in a moment.')
+      return
+    }
+
+    setIsProcessingPayment(true)
+    const customerEmail = user?.email || 'student@campus.unieats.co.za'
+    const reference = `UE_${Date.now()}_${Math.floor(1000 + Math.random() * 9000)}`
+    const amountInCents = Math.round(total * 100)
+
+    try {
+      const handler = window.PaystackPop.setup({
+        key: publicKey,
+        email: customerEmail,
+        amount: amountInCents,
+        currency: 'ZAR',
+        ref: reference,
+        metadata: {
+          customerId: user?.uid || 'guest-user',
+          restaurantId: cart[0]?.restaurantId,
+          restaurantName: cart[0]?.restaurantName,
+          pickupTime,
+        },
+        callback: (response) => {
+          // Verify transaction server-to-server before creating the order
+          ;(async () => {
+            try {
+              const verifyRes = await fetch('/api/paystack/verify', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  reference: response.reference,
+                  expectedAmountZar: total,
+                }),
+              })
+
+              const verifyData = await verifyRes.json()
+
+              if (!verifyRes.ok || !verifyData.verified) {
+                setPaymentError(
+                  verifyData.error || 'Payment verification failed on the server. Please contact support with ref: ' + response.reference
+                )
+                setIsProcessingPayment(false)
+                return
+              }
+
+              // Server verified payment amount and status === 'success'
+              await placeOrder({
+                paymentReference: verifyData.reference,
+                paymentStatus: 'paid',
+                paymentChannel: verifyData.channel || 'paystack',
+              })
+            } catch (err) {
+              console.error('Error verifying payment:', err)
+              setPaymentError('Network error while verifying payment.')
+            } finally {
+              setIsProcessingPayment(false)
+            }
+          })()
+        },
+        onClose: () => {
+          setIsProcessingPayment(false)
+        },
+      })
+
+      handler.openIframe()
+    } catch (err: any) {
+      console.error('Paystack popup error:', err)
+      setPaymentError(err?.message || 'Could not launch Paystack checkout.')
+      setIsProcessingPayment(false)
+    }
+  }
 
   if (cart.length === 0) {
     return (
@@ -111,6 +246,20 @@ export function CheckoutScreen() {
           onClick={() => setSheet('payment')}
         />
 
+        {/* Security Badge */}
+        {paymentMethod.startsWith('Paystack') && (
+          <div className="flex items-center gap-2 rounded-xl bg-primary/10 px-3.5 py-2.5 text-xs font-medium text-primary">
+            <span>🔒</span>
+            <span>Secured by Paystack (256-bit SSL encrypted, server-verified)</span>
+          </div>
+        )}
+
+        {paymentError && (
+          <div className="rounded-xl border border-destructive/30 bg-destructive/10 p-3 text-xs font-semibold text-destructive">
+            {paymentError}
+          </div>
+        )}
+
         {/* Order summary */}
         <div className="mt-1 rounded-2xl bg-card p-4 shadow-sm ring-1 ring-border">
           <h2 className="mb-3 text-sm font-bold text-card-foreground">
@@ -149,10 +298,17 @@ export function CheckoutScreen() {
       <div className="sticky bottom-0 mt-4 bg-background px-5 pb-2 pt-2">
         <button
           type="button"
-          onClick={placeOrder}
-          className="flex w-full items-center justify-between rounded-full bg-primary px-6 py-4 text-sm font-bold text-primary-foreground"
+          onClick={handleCheckout}
+          disabled={isProcessingPayment}
+          className="flex w-full items-center justify-between rounded-full bg-primary px-6 py-4 text-sm font-bold text-primary-foreground disabled:opacity-60"
         >
-          <span>Place order</span>
+          <span>
+            {isProcessingPayment
+              ? 'Processing secure payment...'
+              : paymentMethod.startsWith('Paystack')
+                ? 'Pay with Paystack'
+                : 'Place order'}
+          </span>
           <span>{formatPrice(total)}</span>
         </button>
       </div>
@@ -184,6 +340,7 @@ export function CheckoutScreen() {
           selected={paymentMethod}
           onSelect={(v) => {
             setPaymentMethod(v)
+            setPaymentError(null)
             setSheet(null)
           }}
         />

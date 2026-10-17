@@ -18,20 +18,51 @@ import {
   ClockIcon,
   PinIcon,
   CheckIcon,
+  PlusIcon,
 } from '@/components/icons'
 import { cn } from '@/lib/utils'
 
+import { useFirebaseRestaurants } from '@/lib/firebase-db'
+
 export function HomeScreen() {
-  const { campusId, setCampus, openRestaurant } = useStore()
+  const { campusId, setCampus, openRestaurant, addLine } = useStore()
+  const { restaurants: liveRestaurants } = useFirebaseRestaurants()
   const [campusOpen, setCampusOpen] = useState(false)
   const [query, setQuery] = useState('')
   const [category, setCategory] = useState('All')
+  const [addedItemId, setAddedItemId] = useState<string | null>(null)
+
+  const handleQuickAdd = (m: {
+    id: string
+    name: string
+    restaurant: string
+    restaurantId: string
+    price: number
+    image: string
+  }) => {
+    addLine({
+      itemId: m.id,
+      name: m.name,
+      image: m.image,
+      unitPrice: m.price,
+      quantity: 1,
+      restaurantId: m.restaurantId,
+      restaurantName: m.restaurant,
+      modifierLabels: [],
+    })
+    setAddedItemId(m.id)
+    setTimeout(() => {
+      setAddedItemId((prev) => (prev === m.id ? null : prev))
+    }, 1200)
+  }
 
   const campus = campuses.find((c) => c.id === campusId)!
 
+  const allRestaurants = liveRestaurants && liveRestaurants.length > 0 ? liveRestaurants : restaurants
+
   const campusRestaurants = useMemo(
-    () => restaurants.filter((r) => r.campusIds.includes(campusId)),
-    [campusId],
+    () => allRestaurants.filter((r) => r.campusIds?.includes(campusId)),
+    [campusId, allRestaurants],
   )
 
   const filtered = useMemo(() => {
@@ -43,12 +74,39 @@ export function HomeScreen() {
       const matchesCat =
         category === 'All' ||
         r.cuisine.toLowerCase().includes(category.toLowerCase()) ||
-        r.menu.some((m) => m.section.toLowerCase().includes(category.toLowerCase()))
+        (r.menu && r.menu.some((m) => m.section?.toLowerCase().includes(category.toLowerCase())))
       return matchesQuery && matchesCat
     })
   }, [campusRestaurants, query, category])
 
-  const featured = campusRestaurants.filter((r) => r.rating >= 4.7).slice(0, 3)
+  const featured = campusRestaurants.slice(0, 4)
+
+  const liveTrendingMeals = useMemo(() => {
+    const list: {
+      id: string
+      name: string
+      restaurant: string
+      restaurantId: string
+      price: number
+      image: string
+    }[] = []
+
+    for (const r of campusRestaurants) {
+      if (r.menu) {
+        for (const item of r.menu) {
+          list.push({
+            id: item.id,
+            name: item.name,
+            restaurant: r.name,
+            restaurantId: r.id,
+            price: item.price,
+            image: item.image || r.image || '/food/burger.png',
+          })
+        }
+      }
+    }
+    return list.slice(0, 8)
+  }, [campusRestaurants])
 
   return (
     <div className="pb-4">
@@ -150,10 +208,16 @@ export function HomeScreen() {
                     <h3 className="text-base font-bold text-card-foreground">
                       {r.name}
                     </h3>
-                    <span className="flex items-center gap-1 text-sm font-bold text-foreground">
-                      <StarIcon filled className="h-4 w-4 text-accent" />
-                      {r.rating}
-                    </span>
+                    {r.reviews && r.reviews > 0 ? (
+                      <span className="flex items-center gap-1 text-sm font-bold text-foreground">
+                        <StarIcon filled className="h-4 w-4 text-accent" />
+                        {r.rating.toFixed(1)}
+                      </span>
+                    ) : (
+                      <span className="rounded-full bg-primary/10 px-2 py-0.5 text-[11px] font-bold text-primary">
+                        New
+                      </span>
+                    )}
                   </div>
                   <p className="mt-0.5 text-sm text-muted-foreground">{r.cuisine}</p>
                   <div className="mt-3 flex items-center gap-3 text-xs font-medium text-muted-foreground">
@@ -174,30 +238,92 @@ export function HomeScreen() {
       )}
 
       {/* Trending meals */}
-      {category === 'All' && query === '' && (
+      {category === 'All' && query === '' && liveTrendingMeals.length > 0 && (
         <section className="mt-6">
           <SectionHeader title="Trending meals" />
           <div className="no-scrollbar flex gap-4 overflow-x-auto px-5 pb-1">
-            {trendingMeals.map((m) => (
-              <button
+            {liveTrendingMeals.map((m) => (
+              <div
                 key={m.id}
-                type="button"
-                onClick={() => openRestaurant(m.restaurantId)}
-                className="w-40 shrink-0 text-left"
+                className="group relative flex w-40 shrink-0 flex-col justify-between text-left"
               >
-                <div className="relative h-28 w-40 overflow-hidden rounded-2xl ring-1 ring-border">
-                  <Image src={m.image} alt={m.name} fill className="object-cover" />
+                <div>
+                  <div className="relative h-28 w-40 overflow-hidden rounded-2xl ring-1 ring-border">
+                    <button
+                      type="button"
+                      onClick={() => openRestaurant(m.restaurantId)}
+                      className="relative h-full w-full block text-left"
+                    >
+                      <Image
+                        src={m.image}
+                        alt={m.name}
+                        fill
+                        className="object-cover transition-transform duration-200 group-hover:scale-105"
+                      />
+                    </button>
+                    {/* Quick Add Floating Button on Image */}
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        handleQuickAdd(m)
+                      }}
+                      className={cn(
+                        'absolute bottom-2 right-2 flex h-8 w-8 items-center justify-center rounded-full shadow-md transition-all active:scale-95',
+                        addedItemId === m.id
+                          ? 'bg-emerald-600 text-white'
+                          : 'bg-primary text-primary-foreground hover:bg-primary/90',
+                      )}
+                      aria-label={`Add ${m.name} to cart`}
+                    >
+                      {addedItemId === m.id ? (
+                        <CheckIcon className="h-4 w-4" />
+                      ) : (
+                        <PlusIcon className="h-4 w-4" />
+                      )}
+                    </button>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => openRestaurant(m.restaurantId)}
+                    className="block text-left w-full"
+                  >
+                    <p className="mt-2 line-clamp-1 text-sm font-bold text-foreground">
+                      {m.name}
+                    </p>
+                    <p className="line-clamp-1 text-xs text-muted-foreground">
+                      {m.restaurant}
+                    </p>
+                  </button>
                 </div>
-                <p className="mt-2 line-clamp-1 text-sm font-bold text-foreground">
-                  {m.name}
-                </p>
-                <p className="line-clamp-1 text-xs text-muted-foreground">
-                  {m.restaurant}
-                </p>
-                <p className="mt-0.5 text-sm font-bold text-primary">
-                  {formatPrice(m.price)}
-                </p>
-              </button>
+                <div className="mt-1 flex items-center justify-between">
+                  <p className="text-sm font-extrabold text-primary">
+                    {formatPrice(m.price)}
+                  </p>
+                  <button
+                    type="button"
+                    onClick={() => handleQuickAdd(m)}
+                    className={cn(
+                      'flex items-center gap-1 rounded-full px-2.5 py-1 text-[11px] font-bold shadow-sm transition-all active:scale-95',
+                      addedItemId === m.id
+                        ? 'bg-emerald-600 text-white'
+                        : 'bg-primary text-primary-foreground hover:bg-primary/90',
+                    )}
+                  >
+                    {addedItemId === m.id ? (
+                      <>
+                        <CheckIcon className="h-3 w-3" />
+                        <span>Added</span>
+                      </>
+                    ) : (
+                      <>
+                        <PlusIcon className="h-3 w-3" />
+                        <span>Add</span>
+                      </>
+                    )}
+                  </button>
+                </div>
+              </div>
             ))}
           </div>
         </section>
@@ -232,10 +358,16 @@ export function HomeScreen() {
                   <h3 className="truncate text-base font-bold text-card-foreground">
                     {r.name}
                   </h3>
-                  <span className="flex shrink-0 items-center gap-1 text-sm font-bold text-foreground">
-                    <StarIcon filled className="h-4 w-4 text-accent" />
-                    {r.rating}
-                  </span>
+                  {r.reviews && r.reviews > 0 ? (
+                    <span className="flex shrink-0 items-center gap-1 text-sm font-bold text-foreground">
+                      <StarIcon filled className="h-4 w-4 text-accent" />
+                      {r.rating.toFixed(1)}
+                    </span>
+                  ) : (
+                    <span className="rounded-full bg-primary/10 px-2 py-0.5 text-xs font-bold text-primary">
+                      New
+                    </span>
+                  )}
                 </div>
                 <p className="truncate text-sm text-muted-foreground">
                   {r.cuisine} · {r.priceLevel}
@@ -260,9 +392,15 @@ export function HomeScreen() {
             </button>
           ))}
           {filtered.length === 0 && (
-            <p className="rounded-2xl bg-card p-6 text-center text-sm text-muted-foreground ring-1 ring-border">
-              No restaurants match your search on this campus.
-            </p>
+            <div className="rounded-3xl bg-card p-8 text-center ring-1 ring-border shadow-sm">
+              <span className="mx-auto flex h-14 w-14 items-center justify-center rounded-full bg-secondary text-muted-foreground">
+                <PinIcon className="h-7 w-7" />
+              </span>
+              <p className="mt-3 text-base font-bold text-foreground">No restaurants available yet</p>
+              <p className="mt-1 text-sm text-muted-foreground max-w-xs mx-auto">
+                No food items have been posted for {campus.name} yet. Store owners can log in to start adding products!
+              </p>
+            </div>
           )}
         </div>
       </section>

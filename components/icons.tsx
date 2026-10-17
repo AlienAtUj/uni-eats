@@ -163,3 +163,65 @@ export function SlidersIcon(props: IconProps) {
     </svg>
   )
 }
+
+
+
+export function PackageIcon(props: IconProps) {
+  return (
+    <svg {...base} {...props}>
+      <path d="M5 8.5L12 3l7 5.5" />
+      <path d="M12 12v9" />
+      <path d="M5 8.5v7l7 4.5" />
+      <path d="M19 8.5v7l-7 4.5" />
+    </svg>
+  )
+}
+
+export function TrendingUpIcon(props: IconProps) {
+  return (
+    <svg {...base} {...props}>
+      <path d="M3 17l4-4 4 4 4-4 4 4" />
+      <path d="M3 9l4-4 4 4 4-4 4 4" />
+    </svg>
+  )
+}
+
+export function MoreVerticalIcon(props: IconProps) {
+  return (
+    <svg {...base} {...props}>
+      <circle cx="12" cy="5" r="1.5" fill="currentColor" />
+      <circle cx="12" cy="12" r="1.5" fill="currentColor" />
+      <circle cx="12" cy="19" r="1.5" fill="currentColor" />
+    </svg>
+  )
+}
+
+export function BellIcon(props: IconProps) {
+  return (
+    <svg {...base} {...props}>
+      <path d="M6 8.5a6 6 0 0 1 12 0v3.5l2 3H4l2-3Z" />
+      <path d="M9 17.5c0 1.2 1.3 2 3 2s3-.8 3-2" />
+      <circle cx="18" cy="5" r="1.5" fill="currentColor" fillOpacity="0.4" />
+    </svg>
+  )
+}
+
+export function TrashIcon(props: IconProps) {
+  return (
+    <svg {...base} {...props}>
+      <path d="M3 6.5h18" />
+      <path d="M8 6.5v-2a1 1 0 0 1 1-1h6a1 1 0 0 1 1 1v2" />
+      <path d="M9 6.5v12a2 2 0 0 0 2 2h2a2 2 0 0 0 2-2v-12" />
+    </svg>
+  )
+}
+
+export function UploadCloudIcon(props: IconProps) {
+  return (
+    <svg {...base} {...props}>
+      <path d="M7 17.5a4.5 4.5 0 0 0 0-9 4.5 4.5 0 0 1 6-6 4.5 4.5 0 0 1 6 6 4.5 4.5 0 0 1 0 9" />
+      <path d="M12 11.5v5" />
+      <path d="M10 13.5l2-2 2 2" />
+    </svg>
+  )
+}

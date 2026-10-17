@@ -8,7 +8,7 @@ const items: { key: string; label: string; screen: Screen; Icon: typeof HomeIcon
   { key: 'home', label: 'Home', screen: 'home', Icon: HomeIcon },
   { key: 'cart', label: 'Cart', screen: 'cart', Icon: BagIcon },
   { key: 'orders', label: 'Orders', screen: 'tracking', Icon: ReceiptIcon },
-  { key: 'account', label: 'Account', screen: 'home', Icon: UserIcon },
+  { key: 'profile', label: 'Account', screen: 'profile', Icon: UserIcon },
 ]
 
 export function BottomNav() {
@@ -19,7 +19,9 @@ export function BottomNav() {
       ? 'cart'
       : screen === 'tracking'
         ? 'orders'
-        : 'home'
+        : screen === 'profile'
+          ? 'profile'
+          : 'home'
 
   return (
     <nav className="border-t border-border bg-card/95 backdrop-blur">

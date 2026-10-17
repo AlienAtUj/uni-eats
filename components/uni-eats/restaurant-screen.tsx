@@ -13,19 +13,44 @@ import {
   PlusIcon,
 } from '@/components/icons'
 
+import { useFirebaseProducts } from '@/lib/firebase-db'
+
 export function RestaurantScreen() {
   const { activeRestaurant, goHome } = useStore()
   const [selected, setSelected] = useState<MenuItem | null>(null)
+  const { products: fbProducts } = useFirebaseProducts()
 
   const sections = useMemo(() => {
     if (!activeRestaurant) return []
     const map = new Map<string, MenuItem[]>()
-    for (const item of activeRestaurant.menu) {
-      if (!map.has(item.section)) map.set(item.section, [])
-      map.get(item.section)!.push(item)
+
+    // Existing base menu items
+    const baseItems = activeRestaurant.menu || []
+    
+    // Additional products from Firestore for this merchant
+    const merchantFbProducts = fbProducts
+      .filter((p) => p.merchantId === activeRestaurant.id)
+      .map((p) => ({
+        id: p.id,
+        name: p.name,
+        description: p.description || '',
+        price: p.price,
+        image: (p.images && p.images[0]) || activeRestaurant.image || '/food/burger.png',
+        section: p.category || 'Menu',
+        modifiers: p.modifierGroups || [],
+      }))
+
+    // Combine avoiding duplicate IDs
+    const existingIds = new Set(baseItems.map((i) => i.id))
+    const combined = [...baseItems, ...merchantFbProducts.filter((p) => !existingIds.has(p.id))]
+
+    for (const item of combined) {
+      const sectionName = item.section || 'Menu'
+      if (!map.has(sectionName)) map.set(sectionName, [])
+      map.get(sectionName)!.push(item)
     }
     return Array.from(map.entries())
-  }, [activeRestaurant])
+  }, [activeRestaurant, fbProducts])
 
   if (!activeRestaurant) return null
   const r = activeRestaurant
@@ -55,13 +80,19 @@ export function RestaurantScreen() {
           {r.cuisine} · {r.priceLevel}
         </p>
         <div className="mt-3 flex flex-wrap items-center gap-2">
-          <span className="flex items-center gap-1 rounded-full bg-card px-3 py-1.5 text-sm font-bold text-foreground ring-1 ring-border">
-            <StarIcon filled className="h-4 w-4 text-accent" />
-            {r.rating}
-            <span className="font-medium text-muted-foreground">
-              ({r.reviews.toLocaleString()})
+          {r.reviews && r.reviews > 0 ? (
+            <span className="flex items-center gap-1 rounded-full bg-card px-3 py-1.5 text-sm font-bold text-foreground ring-1 ring-border">
+              <StarIcon filled className="h-4 w-4 text-accent" />
+              {r.rating.toFixed(1)}
+              <span className="font-medium text-muted-foreground">
+                ({r.reviews.toLocaleString()})
+              </span>
             </span>
-          </span>
+          ) : (
+            <span className="rounded-full bg-primary/10 px-3 py-1.5 text-xs font-bold text-primary ring-1 ring-primary/20">
+              New Store (0 reviews)
+            </span>
+          )}
           <span className="flex items-center gap-1 rounded-full bg-card px-3 py-1.5 text-sm font-medium text-muted-foreground ring-1 ring-border">
             <ClockIcon className="h-4 w-4" />
             {r.pickupTime}

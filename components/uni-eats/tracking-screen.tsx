@@ -11,26 +11,61 @@ import {
 } from '@/components/icons'
 import { cn } from '@/lib/utils'
 
+import { subscribeToOrder, updateOrderStatus, type OrderStatus } from '@/lib/firebase-db'
+
 const stages = [
-  { key: 'confirmed', title: 'Order confirmed', desc: 'The restaurant received your order.' },
+  { key: 'pending', title: 'Order confirmed', desc: 'The restaurant received your order.' },
   { key: 'preparing', title: 'Preparing your food', desc: 'Your meal is being freshly made.' },
   { key: 'ready', title: 'Ready for pickup', desc: 'Head to the counter to collect it.' },
-  { key: 'collected', title: 'Collected', desc: 'Enjoy your meal. Great times!' },
+  { key: 'completed', title: 'Collected', desc: 'Enjoy your meal. Great times!' },
 ]
+
+const statusToIndex: Record<string, number> = {
+  pending: 0,
+  preparing: 1,
+  ready: 2,
+  completed: 3,
+}
 
 export function TrackingScreen() {
   const { placedOrder, goHome } = useStore()
   const [current, setCurrent] = useState(0)
+  const [isUpdatingStatus, setIsUpdatingStatus] = useState(false)
 
   useEffect(() => {
     if (!placedOrder) return
-    setCurrent(0)
-    const timers = [
-      setTimeout(() => setCurrent(1), 2500),
-      setTimeout(() => setCurrent(2), 6000),
-    ]
-    return () => timers.forEach(clearTimeout)
+
+    // If order has a Firestore document, subscribe to real-time status updates
+    if (placedOrder.firestoreId) {
+      const unsub = subscribeToOrder(placedOrder.firestoreId, (liveOrder) => {
+        if (liveOrder && liveOrder.status) {
+          const idx = statusToIndex[liveOrder.status] ?? 0
+          setCurrent(idx)
+        }
+      })
+      return () => unsub()
+    } else {
+      // Keep at pending if no firestoreId yet
+      setCurrent(0)
+    }
   }, [placedOrder])
+
+  const handleMarkCollected = async () => {
+    if (!placedOrder?.firestoreId) {
+      setCurrent(3)
+      return
+    }
+    setIsUpdatingStatus(true)
+    try {
+      await updateOrderStatus(placedOrder.firestoreId, 'completed')
+      setCurrent(3)
+    } catch (err) {
+      console.error('Error confirming collection:', err)
+      setCurrent(3)
+    } finally {
+      setIsUpdatingStatus(false)
+    }
+  }
 
   if (!placedOrder) {
     return (
@@ -134,8 +169,41 @@ export function TrackingScreen() {
         </ol>
       </div>
 
+      {/* Ready / Collected action banners */}
+      {current === 2 && (
+        <div className="mt-3 px-5">
+          <div className="rounded-2xl border-2 border-emerald-500/40 bg-emerald-500/10 p-4 text-center">
+            <span className="text-2xl">🎉</span>
+            <h3 className="mt-1 text-base font-bold text-emerald-600">Your Meal is Ready!</h3>
+            <p className="mt-0.5 text-xs text-muted-foreground">
+              Please pick up your order at the counter. Once you have received your food, tap below:
+            </p>
+            <button
+              type="button"
+              onClick={handleMarkCollected}
+              disabled={isUpdatingStatus}
+              className="mt-3 w-full rounded-full bg-emerald-600 px-6 py-3.5 text-sm font-bold text-white shadow-md hover:bg-emerald-700 active:scale-95 disabled:opacity-50 transition-all"
+            >
+              {isUpdatingStatus ? 'Confirming...' : '✓ I Have Collected My Food'}
+            </button>
+          </div>
+        </div>
+      )}
+
+      {current === 3 && (
+        <div className="mt-3 px-5">
+          <div className="rounded-2xl bg-emerald-500/10 p-4 text-center">
+            <span className="text-2xl">😋</span>
+            <h3 className="mt-1 text-base font-bold text-emerald-600">Order Collected</h3>
+            <p className="mt-0.5 text-xs text-muted-foreground">
+              Thank you! Enjoy your meal.
+            </p>
+          </div>
+        </div>
+      )}
+
       {/* Pickup details */}
-      <div className="mt-1 px-5">
+      <div className="mt-3 px-5">
         <div className="rounded-2xl bg-card p-4 shadow-sm ring-1 ring-border">
           <div className="flex items-start gap-3">
             <PinIcon className="mt-0.5 h-5 w-5 text-primary" />
