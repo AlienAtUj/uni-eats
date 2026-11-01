@@ -173,7 +173,7 @@ export function TrackingScreen() {
       {current === 2 && (
         <div className="mt-3 px-5">
           <div className="rounded-2xl border-2 border-emerald-500/40 bg-emerald-500/10 p-4 text-center">
-            <span className="text-2xl">🎉</span>
+            <CheckIcon className="mx-auto h-6 w-6 text-emerald-600" />
             <h3 className="mt-1 text-base font-bold text-emerald-600">Your Meal is Ready!</h3>
             <p className="mt-0.5 text-xs text-muted-foreground">
               Please pick up your order at the counter. Once you have received your food, tap below:
@@ -184,7 +184,7 @@ export function TrackingScreen() {
               disabled={isUpdatingStatus}
               className="mt-3 w-full rounded-full bg-emerald-600 px-6 py-3.5 text-sm font-bold text-white shadow-md hover:bg-emerald-700 active:scale-95 disabled:opacity-50 transition-all"
             >
-              {isUpdatingStatus ? 'Confirming...' : '✓ I Have Collected My Food'}
+              {isUpdatingStatus ? 'Confirming...' : 'I Have Collected My Food'}
             </button>
           </div>
         </div>
@@ -193,7 +193,7 @@ export function TrackingScreen() {
       {current === 3 && (
         <div className="mt-3 px-5">
           <div className="rounded-2xl bg-emerald-500/10 p-4 text-center">
-            <span className="text-2xl">😋</span>
+            <CheckIcon className="mx-auto h-6 w-6 text-emerald-600" />
             <h3 className="mt-1 text-base font-bold text-emerald-600">Order Collected</h3>
             <p className="mt-0.5 text-xs text-muted-foreground">
               Thank you! Enjoy your meal.
@@ -245,7 +245,9 @@ export function TrackingScreen() {
           </div>
           <div className="my-3 h-px bg-border" />
           <div className="flex items-center justify-between">
-            <span className="text-base font-bold text-foreground">Total paid</span>
+            <span className="text-base font-bold text-foreground">
+              {o.paymentStatus === 'paid' ? 'Total paid (Paystack)' : 'Total (Cash on Pickup)'}
+            </span>
             <span className="text-base font-extrabold text-foreground">
               {formatPrice(o.total)}
             </span>

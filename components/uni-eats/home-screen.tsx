@@ -6,11 +6,13 @@ import {
   campuses,
   categories,
   restaurants,
-  trendingMeals,
   formatPrice,
+  type MenuItem,
+  type Restaurant,
 } from '@/lib/data'
 import { useStore } from './store'
 import { BottomSheet } from './sheet'
+import { ItemSheet } from './item-sheet'
 import {
   SearchIcon,
   ChevronDownIcon,
@@ -24,6 +26,17 @@ import { cn } from '@/lib/utils'
 
 import { useFirebaseRestaurants } from '@/lib/firebase-db'
 
+type TrendingMealEntry = {
+  id: string
+  name: string
+  restaurant: string
+  restaurantId: string
+  price: number
+  image: string
+  item: MenuItem
+  restaurantObj: Restaurant
+}
+
 export function HomeScreen() {
   const { campusId, setCampus, openRestaurant, addLine } = useStore()
   const { restaurants: liveRestaurants } = useFirebaseRestaurants()
@@ -31,15 +44,18 @@ export function HomeScreen() {
   const [query, setQuery] = useState('')
   const [category, setCategory] = useState('All')
   const [addedItemId, setAddedItemId] = useState<string | null>(null)
+  const [selectedMeal, setSelectedMeal] = useState<{
+    item: MenuItem
+    restaurant: Restaurant
+  } | null>(null)
 
-  const handleQuickAdd = (m: {
-    id: string
-    name: string
-    restaurant: string
-    restaurantId: string
-    price: number
-    image: string
-  }) => {
+  const handleQuickAdd = (m: TrendingMealEntry) => {
+    const hasRequiredModifiers = m.item.modifiers?.some((g) => g.required)
+    if (hasRequiredModifiers) {
+      setSelectedMeal({ item: m.item, restaurant: m.restaurantObj })
+      return
+    }
+
     addLine({
       itemId: m.id,
       name: m.name,
@@ -66,15 +82,31 @@ export function HomeScreen() {
   )
 
   const filtered = useMemo(() => {
+    const q = query.trim().toLowerCase()
+    const cat = category.toLowerCase()
+    const catSingular = cat.endsWith('s') ? cat.slice(0, -1) : cat
+
     return campusRestaurants.filter((r) => {
+      const cuisineLower = (r.cuisine || '').toLowerCase()
       const matchesQuery =
-        query.trim() === '' ||
-        r.name.toLowerCase().includes(query.toLowerCase()) ||
-        r.cuisine.toLowerCase().includes(query.toLowerCase())
+        q === '' ||
+        r.name.toLowerCase().includes(q) ||
+        cuisineLower.includes(q) ||
+        (r.menu &&
+          r.menu.some(
+            (m) =>
+              m.name.toLowerCase().includes(q) ||
+              (m.description && m.description.toLowerCase().includes(q)),
+          ))
       const matchesCat =
         category === 'All' ||
-        r.cuisine.toLowerCase().includes(category.toLowerCase()) ||
-        (r.menu && r.menu.some((m) => m.section?.toLowerCase().includes(category.toLowerCase())))
+        cuisineLower.includes(cat) ||
+        cuisineLower.includes(catSingular) ||
+        (r.menu &&
+          r.menu.some((m) => {
+            const sec = (m.section || '').toLowerCase()
+            return sec.includes(cat) || sec.includes(catSingular)
+          }))
       return matchesQuery && matchesCat
     })
   }, [campusRestaurants, query, category])
@@ -82,31 +114,46 @@ export function HomeScreen() {
   const featured = campusRestaurants.slice(0, 4)
 
   const liveTrendingMeals = useMemo(() => {
-    const list: {
-      id: string
-      name: string
-      restaurant: string
-      restaurantId: string
-      price: number
-      image: string
-    }[] = []
+    const list: TrendingMealEntry[] = []
+    const q = query.trim().toLowerCase()
+    const cat = category.toLowerCase()
+    const catSingular = cat.endsWith('s') ? cat.slice(0, -1) : cat
 
     for (const r of campusRestaurants) {
       if (r.menu) {
         for (const item of r.menu) {
-          list.push({
-            id: item.id,
-            name: item.name,
-            restaurant: r.name,
-            restaurantId: r.id,
-            price: item.price,
-            image: item.image || r.image || '/food/burger.png',
-          })
+          const sec = (item.section || r.cuisine || '').toLowerCase()
+          const matchesQuery =
+            q === '' ||
+            item.name.toLowerCase().includes(q) ||
+            (item.description && item.description.toLowerCase().includes(q)) ||
+            r.name.toLowerCase().includes(q)
+          const matchesCat =
+            category === 'All' ||
+            sec.includes(cat) ||
+            sec.includes(catSingular)
+
+          if (matchesQuery && matchesCat) {
+            const resolvedImage = item.image || r.image || '/food/burger.png'
+            list.push({
+              id: item.id,
+              name: item.name,
+              restaurant: r.name,
+              restaurantId: r.id,
+              price: item.price,
+              image: resolvedImage,
+              item: {
+                ...item,
+                image: resolvedImage,
+              },
+              restaurantObj: r,
+            })
+          }
         }
       }
     }
-    return list.slice(0, 8)
-  }, [campusRestaurants])
+    return list.slice(0, 12)
+  }, [campusRestaurants, query, category])
 
   return (
     <div className="pb-4">
@@ -238,9 +285,11 @@ export function HomeScreen() {
       )}
 
       {/* Trending meals */}
-      {category === 'All' && query === '' && liveTrendingMeals.length > 0 && (
+      {liveTrendingMeals.length > 0 && (
         <section className="mt-6">
-          <SectionHeader title="Trending meals" />
+          <SectionHeader
+            title={category === 'All' && query === '' ? 'Trending meals' : 'Meals'}
+          />
           <div className="no-scrollbar flex gap-4 overflow-x-auto px-5 pb-1">
             {liveTrendingMeals.map((m) => (
               <div
@@ -251,7 +300,9 @@ export function HomeScreen() {
                   <div className="relative h-28 w-40 overflow-hidden rounded-2xl ring-1 ring-border">
                     <button
                       type="button"
-                      onClick={() => openRestaurant(m.restaurantId)}
+                      onClick={() =>
+                        setSelectedMeal({ item: m.item, restaurant: m.restaurantObj })
+                      }
                       className="relative h-full w-full block text-left"
                     >
                       <Image
@@ -285,7 +336,9 @@ export function HomeScreen() {
                   </div>
                   <button
                     type="button"
-                    onClick={() => openRestaurant(m.restaurantId)}
+                    onClick={() =>
+                      setSelectedMeal({ item: m.item, restaurant: m.restaurantObj })
+                    }
                     className="block text-left w-full"
                   >
                     <p className="mt-2 line-clamp-1 text-sm font-bold text-foreground">
@@ -297,9 +350,15 @@ export function HomeScreen() {
                   </button>
                 </div>
                 <div className="mt-1 flex items-center justify-between">
-                  <p className="text-sm font-extrabold text-primary">
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setSelectedMeal({ item: m.item, restaurant: m.restaurantObj })
+                    }
+                    className="text-left text-sm font-extrabold text-primary"
+                  >
                     {formatPrice(m.price)}
-                  </p>
+                  </button>
                   <button
                     type="button"
                     onClick={() => handleQuickAdd(m)}
@@ -456,6 +515,15 @@ export function HomeScreen() {
           })}
         </ul>
       </BottomSheet>
+
+      {/* Product Details Sheet */}
+      {selectedMeal && (
+        <ItemSheet
+          item={selectedMeal.item}
+          restaurant={selectedMeal.restaurant}
+          onClose={() => setSelectedMeal(null)}
+        />
+      )}
     </div>
   )
 }

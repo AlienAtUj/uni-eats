@@ -3,8 +3,13 @@
 import React, { useState } from 'react'
 import Image from 'next/image'
 import { useRouter } from 'next/navigation'
-import { ArrowLeftIcon, UserIcon, ReceiptIcon } from '@/components/icons'
-import { Store, User, LogOut } from 'lucide-react'
+import {
+  ArrowLeftIcon,
+  UserIcon,
+  ReceiptIcon,
+  StoreIcon,
+  LogOutIcon,
+} from '@/components/icons'
 import { signInWithEmailAndPassword, createUserWithEmailAndPassword } from 'firebase/auth'
 import { auth } from '@/lib/firebase'
 import { dashboardPathForRole, fetchUserRole, saveUserProfile, type UserRole } from '@/lib/firebase-auth'
@@ -227,7 +232,7 @@ function AuthSignupForm({ onSwitch }: { onSwitch: () => void }) {
               role === 'student' ? 'border-primary bg-primary/5 text-primary' : 'bg-card text-muted-foreground'
             }`}
           >
-            <User className="h-6 w-6" />
+            <UserIcon className="h-6 w-6" />
             <span className="text-sm font-bold">Student</span>
           </button>
           <button
@@ -237,7 +242,7 @@ function AuthSignupForm({ onSwitch }: { onSwitch: () => void }) {
               role === 'merchant' ? 'border-primary bg-primary/5 text-primary' : 'bg-card text-muted-foreground'
             }`}
           >
-            <Store className="h-6 w-6" />
+            <StoreIcon className="h-6 w-6" />
             <span className="text-sm font-bold">Store Owner</span>
           </button>
         </div>
@@ -426,7 +431,7 @@ export function UserProfileView({ user, userRole, onSignOut, onGoHome, onOrders 
         <h2 className="text-xl font-bold text-foreground">{user.displayName || 'UniEats User'}</h2>
         <p className="text-sm text-muted-foreground">{user.email}</p>
         <div className="mt-3 inline-flex items-center gap-1.5 rounded-full bg-accent/10 px-3 py-1 text-xs font-bold text-accent">
-          {isMerchant ? <Store className="h-3.5 w-3.5" /> : <User className="h-3.5 w-3.5" />}
+          {isMerchant ? <StoreIcon className="h-3.5 w-3.5" /> : <UserIcon className="h-3.5 w-3.5" />}
           {isMerchant ? 'Store Owner' : 'Student'}
         </div>
       </div>
@@ -438,7 +443,7 @@ export function UserProfileView({ user, userRole, onSignOut, onGoHome, onOrders 
             className="flex w-full items-center gap-3 rounded-2xl bg-primary px-4 py-4 text-left font-semibold text-primary-foreground shadow-sm transition-transform active:scale-[0.98] hover:brightness-110"
           >
             <div className="rounded-full bg-white/20 p-2">
-              <Store className="h-5 w-5" />
+              <StoreIcon className="h-5 w-5" />
             </div>
             <div className="flex-1">
               <span className="block text-base">Store Dashboard</span>
@@ -467,7 +472,7 @@ export function UserProfileView({ user, userRole, onSignOut, onGoHome, onOrders 
           className="mt-6 flex w-full items-center gap-3 rounded-2xl border border-destructive/20 bg-destructive/5 px-4 py-4 text-left font-semibold text-destructive shadow-sm transition-transform active:scale-[0.98] hover:bg-destructive/10"
         >
           <div className="rounded-full bg-destructive/10 p-2">
-            <LogOut className="h-5 w-5" />
+            <LogOutIcon className="h-5 w-5" />
           </div>
           <span className="block text-base">Sign out</span>
         </button>

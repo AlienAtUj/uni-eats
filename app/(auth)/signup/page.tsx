@@ -2,8 +2,7 @@
 
 import React, { useState } from 'react'
 import Link from 'next/link'
-import { ArrowLeftIcon } from '@/components/icons'
-import { Store, User } from 'lucide-react'
+import { ArrowLeftIcon, StoreIcon, UserIcon } from '@/components/icons'
 import { createUserWithEmailAndPassword } from 'firebase/auth'
 import { auth } from '@/lib/firebase'
 import { dashboardPathForRole, saveUserProfile, type UserRole } from '@/lib/firebase-auth'
@@ -23,25 +22,11 @@ export default function SignUpPage() {
     setIsLoading(true)
     setErrorMsg('')
 
-    // 🔍 DEBUG: log the selected role before submission
-    console.log('🔹 Selected role before submit:', role)
-
     try {
-      // 1. Create standard Firebase Auth user
       const userCredential = await createUserWithEmailAndPassword(auth, email, password)
-
-      // 🔍 DEBUG: log role we are about to save
-      console.log('🔹 User created, now saving profile with role:', role)
-
-      // 2. Save role and profile details to Firestore `users` collection immediately
       await saveUserProfile(userCredential.user.uid, { name, email, role })
-
-      // 🔍 DEBUG: log where we are redirecting
-      console.log('🔹 Redirecting to:', dashboardPathForRole(role))
-
       router.replace(dashboardPathForRole(role))
     } catch (err: any) {
-      console.error('🔹 Signup error:', err)   // <-- ADDED
       setErrorMsg(err.message || 'An error occurred during sign up.')
     } finally {
       setIsLoading(false)
@@ -70,29 +55,23 @@ export default function SignUpPage() {
         <div className="grid grid-cols-2 gap-3 mb-2">
           <button
             type="button"
-            onClick={() => {
-              console.log('Set role to student') // optional debug
-              setRole('student')
-            }}
+            onClick={() => setRole('student')}
             className={`flex flex-col items-center gap-2 rounded-2xl border p-4 transition-colors ${
               role === 'student' ? 'border-primary bg-primary/5 text-primary' : 'bg-card text-muted-foreground'
             }`}
           >
-            <User className="h-6 w-6" />
+            <UserIcon className="h-6 w-6" />
             <span className="text-sm font-bold">Student</span>
           </button>
           
           <button
             type="button"
-            onClick={() => {
-              console.log('Set role to merchant') // optional debug
-              setRole('merchant')
-            }}
+            onClick={() => setRole('merchant')}
             className={`flex flex-col items-center gap-2 rounded-2xl border p-4 transition-colors ${
               role === 'merchant' ? 'border-primary bg-primary/5 text-primary' : 'bg-card text-muted-foreground'
             }`}
           >
-            <Store className="h-6 w-6" />
+            <StoreIcon className="h-6 w-6" />
             <span className="text-sm font-bold">Store Owner</span>
           </button>
         </div>

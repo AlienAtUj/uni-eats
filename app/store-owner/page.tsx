@@ -1,13 +1,11 @@
 'use client'
 
-import React, { useState, useEffect } from 'react'
+import React, { useState, useEffect, useMemo } from 'react'
 import {
   PlusIcon,
   PackageIcon,
   TrendingUpIcon,
   BagIcon,
-  StarIcon,
-  MoreVerticalIcon,
   SearchIcon,
   BellIcon,
   CloseIcon,
@@ -15,68 +13,124 @@ import {
   UploadCloudIcon,
   CheckIcon,
   ClockIcon,
+  PinIcon,
+  ChevronDownIcon,
+  ReceiptIcon,
+  EditIcon,
+  StoreIcon,
+  UserIcon,
+  LogOutIcon,
 } from '@/components/icons'
-import { formatPrice, campuses, categories } from '@/lib/data'
+import { BottomSheet } from '@/components/uni-eats/sheet'
+import { formatPrice, campuses } from '@/lib/data'
 import Image from 'next/image'
-import { 
-  useFirebaseProducts, 
-  createProduct, 
+import {
+  useFirebaseProducts,
+  createProduct,
   updateProduct,
-  updateProductPrice, 
-  deleteProduct, 
-  getMerchantOrders, 
+  updateProductPrice,
+  deleteProduct,
   subscribeToMerchantOrders,
-  updateOrderStatus, 
-  type Order, 
-  type OrderStatus 
+  updateOrderStatus,
+  type Order,
+  type OrderStatus,
 } from '@/lib/firebase-db'
-import { auth } from '@/lib/firebase'
-import { onAuthStateChanged } from 'firebase/auth'
-import { fetchUserRole, type UserRole } from '@/lib/firebase-auth'
+import { auth, db } from '@/lib/firebase'
+import { onAuthStateChanged, signOut, type User } from 'firebase/auth'
+import { fetchUserRole } from '@/lib/firebase-auth'
 import { useRouter } from 'next/navigation'
-import Link from 'next/link'
 import { doc, getDoc, setDoc } from 'firebase/firestore'
-import { db } from '@/lib/firebase'
+import { cn } from '@/lib/utils'
 
-const statusColors: Record<OrderStatus, string> = {
-  pending: 'bg-accent/10 text-accent font-bold',
-  preparing: 'bg-blue-500/10 text-blue-600 font-bold',
-  ready: 'bg-primary/10 text-primary font-bold',
-  completed: 'bg-muted text-muted-foreground font-semibold',
-  cancelled: 'bg-destructive/10 text-destructive font-semibold',
+type MerchantTab = 'orders' | 'products' | 'store' | 'account'
+type OrderFilter = 'all' | 'pending' | 'preparing' | 'ready' | 'completed'
+
+const statusStyles: Record<OrderStatus, { pill: string; label: string }> = {
+  pending: {
+    pill: 'bg-accent/15 text-accent-foreground',
+    label: 'New',
+  },
+  preparing: {
+    pill: 'bg-primary/10 text-primary',
+    label: 'Preparing',
+  },
+  ready: {
+    pill: 'bg-primary text-primary-foreground',
+    label: 'Ready',
+  },
+  completed: {
+    pill: 'bg-secondary text-muted-foreground',
+    label: 'Collected',
+  },
+  cancelled: {
+    pill: 'bg-destructive/10 text-destructive',
+    label: 'Cancelled',
+  },
 }
 
-const statusOptions: OrderStatus[] = ['pending', 'preparing', 'ready', 'completed']
+const statusPriority: Record<OrderStatus, number> = {
+  pending: 0,
+  preparing: 1,
+  ready: 2,
+  completed: 3,
+  cancelled: 4,
+}
+
+const orderFilters: { key: OrderFilter; label: string }[] = [
+  { key: 'all', label: 'All' },
+  { key: 'pending', label: 'New' },
+  { key: 'preparing', label: 'Preparing' },
+  { key: 'ready', label: 'Ready' },
+  { key: 'completed', label: 'Collected' },
+]
 
 export default function StoreOwnerDashboard() {
   const router = useRouter()
-  const [activeTab, setActiveTab] = useState<'orders' | 'products'>('orders')
+  const [activeTab, setActiveTab] = useState<MerchantTab>('orders')
+  const [orderFilter, setOrderFilter] = useState<OrderFilter>('all')
+  const [searchQuery, setSearchQuery] = useState('')
+
+  const [currentUser, setCurrentUser] = useState<User | null>(null)
   const [merchantId, setMerchantId] = useState<string | null>(null)
-  const [merchantName, setMerchantName] = useState<string>('Store Owner')
+  const [merchantName, setMerchantName] = useState<string>('Campus Store')
   const [storeLocation, setStoreLocation] = useState<string>('Student Centre')
   const [storeCampusId, setStoreCampusId] = useState<string>('aucklandpark')
   const [storePickupTime, setStorePickupTime] = useState<string>('10-15 min')
-  
-  const [isEditingStoreName, setIsEditingStoreName] = useState(false)
+
   const [newStoreName, setNewStoreName] = useState('')
   const [newStoreLocation, setNewStoreLocation] = useState('')
   const [newStoreCampusId, setNewStoreCampusId] = useState('aucklandpark')
   const [newStorePickupTime, setNewStorePickupTime] = useState('10-15 min')
-  const [isSavingName, setIsSavingName] = useState(false)
+  const [isSavingStore, setIsSavingStore] = useState(false)
+  const [savedStoreSuccess, setSavedStoreSuccess] = useState(false)
+
   const [isCheckingAccess, setIsCheckingAccess] = useState(true)
   const [orders, setOrders] = useState<Order[]>([])
   const [isLoadingOrders, setIsLoadingOrders] = useState(false)
 
   const { products: fbProducts, mutate } = useFirebaseProducts()
-  // Filter products for this merchant if merchantId is available
-  const allProducts = merchantId 
-    ? fbProducts.filter(p => p.merchantId === merchantId)
-    : fbProducts
+  const allProducts = useMemo(
+    () =>
+      merchantId
+        ? fbProducts.filter((p) => p.merchantId === merchantId)
+        : fbProducts,
+    [fbProducts, merchantId],
+  )
   const [isModalOpen, setIsModalOpen] = useState(false)
+  const [editingProduct, setEditingProduct] = useState<any | null>(null)
+  const [editingProductId, setEditingProductId] = useState<string | null>(null)
+  const [editingPriceValue, setEditingPriceValue] = useState<string>('')
+  const [isUpdatingPrice, setIsUpdatingPrice] = useState(false)
 
-  // Fetch merchant profile and orders
   useEffect(() => {
+    let unsubOrders: (() => void) | null = null
+
     const unsub = onAuthStateChanged(auth, async (user) => {
+      if (unsubOrders) {
+        unsubOrders()
+        unsubOrders = null
+      }
+
       if (!user) {
         router.replace('/login')
         return
@@ -88,29 +142,35 @@ export default function StoreOwnerDashboard() {
         return
       }
 
+      setCurrentUser(user)
       setMerchantId(user.uid)
 
-      // Fetch merchant details from Firestore
       try {
-        let currentName = 'Store Owner'
+        let currentName = 'Campus Store'
         let loc = 'Student Centre'
         let campus = 'aucklandpark'
         let pickup = '10-15 min'
 
-        const userDoc = await getDoc(doc(db, 'users', user.uid))
+        const [userDoc, restDoc] = await Promise.all([
+          getDoc(doc(db, 'users', user.uid)),
+          getDoc(doc(db, 'restaurants', user.uid)),
+        ])
+
         if (userDoc.exists()) {
           const data = userDoc.data()
-          currentName = data.storeName || data.businessName || data.name || 'Store Owner'
-          if (data.storeLocation || data.location) loc = data.storeLocation || data.location
+          currentName =
+            data.storeName || data.businessName || data.name || 'Campus Store'
+          if (data.storeLocation || data.location)
+            loc = data.storeLocation || data.location
           if (data.campusId) campus = data.campusId
         }
 
-        const restDoc = await getDoc(doc(db, 'restaurants', user.uid))
         if (restDoc.exists()) {
           const rData = restDoc.data()
           if (rData.name) currentName = rData.name
           if (rData.location) loc = rData.location
-          if (rData.campusIds && rData.campusIds.length > 0) campus = rData.campusIds[0]
+          if (rData.campusIds && rData.campusIds.length > 0)
+            campus = rData.campusIds[0]
           if (rData.pickupTime) pickup = rData.pickupTime
         }
 
@@ -126,23 +186,23 @@ export default function StoreOwnerDashboard() {
         console.error('Error fetching merchant details:', error)
       }
 
-      // Subscribe to real-time live orders
       setIsLoadingOrders(true)
-      const unsubOrders = subscribeToMerchantOrders(user.uid, (liveOrders) => {
+      unsubOrders = subscribeToMerchantOrders(user.uid, (liveOrders) => {
         setOrders(liveOrders)
         setIsLoadingOrders(false)
       })
 
       setIsCheckingAccess(false)
+    })
 
-      return () => {
+    return () => {
+      unsub()
+      if (unsubOrders) {
         unsubOrders()
       }
-    })
-    return () => unsub()
+    }
   }, [router])
 
-  // Handle order status update
   const handleStatusUpdate = async (orderId: string, newStatus: OrderStatus) => {
     try {
       await updateOrderStatus(orderId, newStatus)
@@ -152,11 +212,6 @@ export default function StoreOwnerDashboard() {
     }
   }
 
-  const [editingProduct, setEditingProduct] = useState<any | null>(null)
-  const [editingProductId, setEditingProductId] = useState<string | null>(null)
-  const [editingPriceValue, setEditingPriceValue] = useState<string>('')
-  const [isUpdatingPrice, setIsUpdatingPrice] = useState(false)
-
   const handleProductSaved = async (newProductData: any, imageFiles: File[]) => {
     if (!merchantId) {
       alert('You must be logged in as a merchant to manage products.')
@@ -165,7 +220,12 @@ export default function StoreOwnerDashboard() {
 
     try {
       if (editingProduct) {
-        await updateProduct(editingProduct.id, merchantId, newProductData, imageFiles)
+        await updateProduct(
+          editingProduct.id,
+          merchantId,
+          newProductData,
+          imageFiles,
+        )
       } else {
         await createProduct(merchantId, newProductData, imageFiles)
       }
@@ -174,26 +234,55 @@ export default function StoreOwnerDashboard() {
       setEditingProduct(null)
     } catch (e) {
       console.error(e)
-      alert(editingProduct ? 'Failed to update product.' : 'Failed to upload product.')
+      alert(
+        editingProduct
+          ? 'Failed to update product.'
+          : 'Failed to upload product.',
+      )
     }
   }
 
-  if (isCheckingAccess) {
-    return (
-      <div className="flex min-h-dvh items-center justify-center bg-[oklch(0.97_0.01_100)]">
-        <div className="h-8 w-8 animate-spin rounded-full border-4 border-primary border-t-transparent" />
-      </div>
+  // Prioritize new (pending) orders first, then preparing, ready, completed, and newest first within each status
+  const filteredOrders = useMemo(() => {
+    const q = searchQuery.trim().toLowerCase()
+    const matching = orders.filter((o) => {
+      if (orderFilter !== 'all' && o.status !== orderFilter) {
+        return false
+      }
+      if (!q) return true
+      const idMatch = (o.orderId || o.id || '').toLowerCase().includes(q)
+      const customerMatch = (o.customerName || '').toLowerCase().includes(q)
+      const itemsMatch = (o.items || []).some((it) =>
+        (it.name || '').toLowerCase().includes(q),
+      )
+      return idMatch || customerMatch || itemsMatch
+    })
+
+    return [...matching].sort((a, b) => {
+      const prioA = statusPriority[a.status as OrderStatus] ?? 99
+      const prioB = statusPriority[b.status as OrderStatus] ?? 99
+      if (prioA !== prioB) return prioA - prioB
+
+      const timeA =
+        a.createdAt?.toMillis?.() ||
+        (typeof a.createdAt === 'number' ? a.createdAt : 0)
+      const timeB =
+        b.createdAt?.toMillis?.() ||
+        (typeof b.createdAt === 'number' ? b.createdAt : 0)
+      return timeB - timeA
+    })
+  }, [orders, orderFilter, searchQuery])
+
+  const filteredProducts = useMemo(() => {
+    const q = searchQuery.trim().toLowerCase()
+    if (!q) return allProducts
+    return allProducts.filter(
+      (p) =>
+        p.name.toLowerCase().includes(q) ||
+        (p.category || '').toLowerCase().includes(q) ||
+        (p.description || '').toLowerCase().includes(q),
     )
-  }
-
-  const displayOrders = orders
-
-  // Stats from real data
-  const stats = {
-    revenue: orders.filter(o => o.status === 'completed').reduce((sum, o) => sum + o.total, 0),
-    ordersToday: orders.length,
-    rating: 'New (0 reviews)',
-  }
+  }, [allProducts, searchQuery])
 
   const handleStartEditPrice = (product: { id: string; price: number }) => {
     setEditingProductId(product.id)
@@ -202,8 +291,8 @@ export default function StoreOwnerDashboard() {
 
   const handleSavePrice = async (productId: string) => {
     const parsed = parseFloat(editingPriceValue)
-    if (isNaN(parsed) || parsed < 0) {
-      alert('Please enter a valid price.')
+    if (isNaN(parsed) || parsed <= 0) {
+      alert('Please enter a valid price greater than zero.')
       return
     }
     setIsUpdatingPrice(true)
@@ -220,7 +309,7 @@ export default function StoreOwnerDashboard() {
   }
 
   const handleDeleteProduct = async (productId: string, name: string) => {
-    if (!confirm(`Are you sure you want to delete "${name}"?`)) return
+    if (!confirm(`Delete "${name}" from your menu?`)) return
     try {
       await deleteProduct(productId)
       mutate()
@@ -230,238 +319,413 @@ export default function StoreOwnerDashboard() {
     }
   }
 
-  const handleSaveStoreSettings = async () => {
+  const handleSaveStoreSettings = async (e: React.FormEvent) => {
+    e.preventDefault()
     if (!merchantId || !newStoreName.trim()) return
-    setIsSavingName(true)
+    setIsSavingStore(true)
+    setSavedStoreSuccess(false)
     try {
       const cleanName = newStoreName.trim()
       const cleanLoc = newStoreLocation.trim() || 'Student Centre'
       const cleanPickup = newStorePickupTime.trim() || '10-15 min'
-      const campusIds = newStoreCampusId === 'all'
-        ? ['aucklandpark', 'buntingroad', 'doornfontein', 'soweto']
-        : [newStoreCampusId]
+      const campusIds =
+        newStoreCampusId === 'all'
+          ? ['aucklandpark', 'buntingroad', 'doornfontein', 'soweto']
+          : [newStoreCampusId]
 
-      await setDoc(doc(db, 'users', merchantId), { 
-        name: cleanName, 
-        storeName: cleanName,
-        storeLocation: cleanLoc,
-        campusId: newStoreCampusId
-      }, { merge: true })
-
-      await setDoc(doc(db, 'restaurants', merchantId), { 
-        name: cleanName,
-        location: cleanLoc,
-        campusIds: campusIds,
-        pickupTime: cleanPickup
-      }, { merge: true })
+      await Promise.all([
+        setDoc(
+          doc(db, 'users', merchantId),
+          {
+            name: cleanName,
+            storeName: cleanName,
+            storeLocation: cleanLoc,
+            campusId: newStoreCampusId,
+          },
+          { merge: true },
+        ),
+        setDoc(
+          doc(db, 'restaurants', merchantId),
+          {
+            name: cleanName,
+            location: cleanLoc,
+            campusIds: campusIds,
+            pickupTime: cleanPickup,
+          },
+          { merge: true },
+        ),
+      ])
 
       setMerchantName(cleanName)
       setStoreLocation(cleanLoc)
       setStoreCampusId(newStoreCampusId)
       setStorePickupTime(cleanPickup)
-      setIsEditingStoreName(false)
+      setSavedStoreSuccess(true)
+      setTimeout(() => setSavedStoreSuccess(false), 2500)
     } catch (err) {
       console.error('Error saving store details:', err)
       alert('Failed to save store details.')
     } finally {
-      setIsSavingName(false)
+      setIsSavingStore(false)
     }
   }
 
+  const handleSignOut = async () => {
+    await signOut(auth)
+    router.replace('/login')
+  }
+
+  const pendingOrdersCount = orders.filter((o) => o.status === 'pending').length
+  const preparingOrdersCount = orders.filter(
+    (o) => o.status === 'preparing',
+  ).length
+  const readyOrdersCount = orders.filter((o) => o.status === 'ready').length
+  const completedOrdersCount = orders.filter(
+    (o) => o.status === 'completed',
+  ).length
+  const activeOrdersCount =
+    pendingOrdersCount + preparingOrdersCount + readyOrdersCount
+
+  const filterCounts: Record<OrderFilter, number> = {
+    all: orders.length,
+    pending: pendingOrdersCount,
+    preparing: preparingOrdersCount,
+    ready: readyOrdersCount,
+    completed: completedOrdersCount,
+  }
+
+  const totalRevenue = orders
+    .filter((o) => o.status === 'completed' || o.paymentStatus === 'paid')
+    .reduce((sum, o) => sum + (Number(o.total) || 0), 0)
+
+  const campusObj = campuses.find((c) => c.id === storeCampusId)
+  const campusShort = campusObj ? campusObj.short : 'All Campuses'
+
   return (
-    <div className="min-h-dvh bg-[oklch(0.97_0.01_100)] text-foreground">
-      {/* Top Navbar */}
-      <header className="sticky top-0 z-10 flex items-center justify-between border-b bg-card px-6 py-4 shadow-sm">
-        <div className="flex items-center gap-4">
-          <div className="flex h-10 w-10 items-center justify-center overflow-hidden rounded-xl bg-primary/10">
-            <Image src="/unieats-logo.jpg" alt="UniEats" width={40} height={40} className="object-cover" />
+    <div className="flex h-dvh justify-center bg-[oklch(0.16_0.03_150)] md:h-auto md:min-h-dvh md:py-8">
+      {/* Same Phone Frame Shell as Student App */}
+      <div className="relative flex h-full w-full max-w-md flex-col overflow-hidden bg-background shadow-2xl md:h-[860px] md:rounded-[2.75rem] md:ring-8 md:ring-[oklch(0.12_0.02_150)]">
+        {isCheckingAccess ? (
+          <div className="flex flex-1 items-center justify-center">
+            <div className="h-8 w-8 animate-spin rounded-full border-4 border-primary border-t-transparent" />
           </div>
-          <div>
-            <div className="flex items-center gap-2">
-              <h1 className="text-lg font-extrabold tracking-tight">{merchantName}</h1>
-              <button
-                type="button"
-                onClick={() => {
-                  setNewStoreName(merchantName)
-                  setNewStoreLocation(storeLocation)
-                  setNewStoreCampusId(storeCampusId)
-                  setNewStorePickupTime(storePickupTime)
-                  setIsEditingStoreName(true)
-                }}
-                className="rounded-lg bg-secondary px-2.5 py-1 text-xs font-bold text-primary hover:bg-secondary/80 transition-colors"
-              >
-                ⚙️ Store Settings & Location
-              </button>
-            </div>
-            <div className="flex items-center gap-2 mt-0.5 text-xs text-muted-foreground font-medium">
-              <span className="flex items-center gap-1 font-semibold text-foreground/80">
-                📍 {storeLocation}
-              </span>
-              <span>•</span>
-              <span className="text-primary font-bold">
-                {campuses.find(c => c.id === storeCampusId)?.name || 'All Campuses'}
-              </span>
-              <span>•</span>
-              <span>{storePickupTime}</span>
-            </div>
-          </div>
-        </div>
-
-        <div className="flex items-center gap-4">
-          <div className="hidden md:flex items-center gap-2 rounded-full bg-background px-4 py-2 ring-1 ring-border">
-            <SearchIcon className="h-4 w-4 text-muted-foreground" />
-            <input
-              placeholder="Search orders or products..."
-              className="bg-transparent text-sm outline-none placeholder:text-muted-foreground w-48"
-            />
-          </div>
-          <button className="relative rounded-full p-2 text-muted-foreground hover:bg-muted transition-colors">
-            <BellIcon className="h-5 w-5" />
-            <span className="absolute right-1.5 top-1.5 flex h-2 w-2 rounded-full bg-accent" />
-          </button>
-          <Link
-            href="/profile"
-            className="flex items-center gap-2 rounded-full py-1 pl-1 pr-3 text-sm font-semibold text-foreground transition-colors hover:bg-muted"
-            aria-label="Open profile"
-          >
-            <span className="flex h-9 w-9 items-center justify-center rounded-full bg-[oklch(0.95_0.02_150)] text-sm font-bold text-primary">
-              {merchantName.charAt(0).toUpperCase()}
-            </span>
-            <span className="hidden sm:inline">Profile</span>
-          </Link>
-        </div>
-      </header>
-
-      <main className="mx-auto max-w-7xl p-6">
-        {/* Stats Grid */}
-        <div className="grid grid-cols-2 gap-4 md:grid-cols-4 md:gap-6">
-          <StatCard
-            title="Today's Revenue"
-            value={formatPrice(stats.revenue)}
-            icon={<TrendingUpIcon className="h-5 w-5 text-primary" />}
-          />
-          <StatCard
-            title="Total Orders"
-            value={stats.ordersToday.toString()}
-            icon={<BagIcon className="h-5 w-5 text-accent" />}
-          />
-          <StatCard
-            title="Active Products"
-            value={allProducts.length.toString()}
-            icon={<PackageIcon className="h-5 w-5 text-blue-500" />}
-          />
-          <StatCard
-            title="Store Rating"
-            value={stats.rating.toString()}
-            icon={<StarIcon filled className="h-5 w-5 fill-accent text-accent" />}
-          />
-        </div>
-
-        {/* Main Content Area */}
-        <div className="mt-8 rounded-3xl border bg-card shadow-sm">
-          <div className="flex items-center justify-between border-b px-6 py-4">
-            <div className="flex gap-6">
-              <button
-                onClick={() => setActiveTab('orders')}
-                className={`text-sm font-bold transition-colors ${
-                  activeTab === 'orders' ? 'text-foreground' : 'text-muted-foreground hover:text-foreground'
-                }`}
-              >
-                Recent Orders
-                {activeTab === 'orders' && <div className="mt-4 h-0.5 rounded-full bg-primary" />}
-              </button>
-              <button
-                onClick={() => setActiveTab('products')}
-                className={`text-sm font-bold transition-colors ${
-                  activeTab === 'products' ? 'text-foreground' : 'text-muted-foreground hover:text-foreground'
-                }`}
-              >
-                Products Catalog
-                {activeTab === 'products' && <div className="mt-4 h-0.5 rounded-full bg-primary" />}
-              </button>
-            </div>
-
-            {activeTab === 'products' && (
-              <button
-                onClick={() => {
-                  setEditingProduct(null)
-                  setIsModalOpen(true)
-                }}
-                className="flex items-center gap-2 rounded-full bg-primary px-4 py-2 text-sm font-bold text-primary-foreground shadow-sm transition-transform active:scale-95 hover:brightness-110"
-              >
-                <PlusIcon className="h-4 w-4" />
-                Add Product
-              </button>
-            )}
-          </div>
-
-          <div className="p-0">
-            {activeTab === 'orders' ? (
-              <div className="overflow-x-auto">
-                {isLoadingOrders ? (
-                  <div className="p-12 text-center">
-                    <div className="h-8 w-8 animate-spin rounded-full border-4 border-primary border-t-transparent mx-auto" />
-                    <p className="mt-4 text-muted-foreground">Loading orders...</p>
+        ) : (
+          <>
+            <main className="min-h-0 flex-1 overflow-y-auto overscroll-contain pb-6">
+              {/* Top Header (matches HomeScreen) */}
+              <header className="bg-[oklch(0.22_0.04_150)] px-5 pb-6 pt-5 text-[oklch(0.97_0.02_120)]">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2.5 min-w-0">
+                    <span className="flex h-9 w-9 shrink-0 items-center justify-center overflow-hidden rounded-xl bg-[oklch(0.97_0.02_120)]/10">
+                      <Image
+                        src="/unieats-logo.jpg"
+                        alt="UniEats"
+                        width={36}
+                        height={36}
+                        className="h-full w-full object-cover"
+                      />
+                    </span>
+                    <div className="min-w-0">
+                      <p className="text-[11px] font-medium text-[oklch(0.97_0.02_120)]/70">
+                        Store Owner Portal
+                      </p>
+                      <p className="truncate text-sm font-extrabold tracking-tight">
+                        {merchantName}
+                      </p>
+                    </div>
                   </div>
-                ) : displayOrders.length > 0 ? (
-                  <table className="w-full text-left text-sm">
-                    <thead className="bg-muted/30 text-muted-foreground uppercase tracking-wider text-[11px] font-semibold">
-                      <tr>
-                        <th className="px-6 py-4">Order ID</th>
-                        <th className="px-6 py-4">Customer</th>
-                        <th className="px-6 py-4">Items</th>
-                        <th className="px-6 py-4">Total</th>
-                        <th className="px-6 py-4">Status</th>
-                        <th className="px-6 py-4 text-right">Action</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-border/50">
-                      {displayOrders.map((order) => (
-                        <tr key={order.id} className="hover:bg-muted/30 transition-colors">
-                          <td className="px-6 py-4 font-bold text-foreground">
-                            {order.orderId || order.id}
-                          </td>
-                          <td className="px-6 py-4">
-                            <span className="font-semibold text-foreground">{order.customerName || 'Student'}</span>
-                          </td>
-                          <td className="px-6 py-4 text-muted-foreground">
-                            {order.items?.map((it: any) => `${it.quantity}x ${it.name}`).join(', ') || 'Items'}
-                          </td>
-                          <td className="px-6 py-4">
-                            <div className="font-extrabold text-foreground">
-                              {formatPrice(order.total)}
+                  <button
+                    type="button"
+                    onClick={() => setActiveTab('account')}
+                    className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-[oklch(0.97_0.02_120)]/10 text-sm font-bold text-[oklch(0.97_0.02_120)]"
+                    aria-label="Store account"
+                  >
+                    {merchantName.charAt(0).toUpperCase()}
+                  </button>
+                </div>
+
+                {/* Location Pill */}
+                <button
+                  type="button"
+                  onClick={() => setActiveTab('store')}
+                  className="mt-4 flex items-center gap-2 rounded-full bg-[oklch(0.97_0.02_120)]/10 px-3.5 py-1.5 text-xs font-semibold text-[oklch(0.97_0.02_120)]"
+                >
+                  <PinIcon className="h-3.5 w-3.5 text-accent" />
+                  <span className="truncate">
+                    {storeLocation} · {campusShort} · {storePickupTime}
+                  </span>
+                  <ChevronDownIcon className="h-3.5 w-3.5 opacity-80" />
+                </button>
+
+                {/* Search Input for Orders & Menu tabs */}
+                {(activeTab === 'orders' || activeTab === 'products') && (
+                  <div className="mt-4 flex items-center gap-2.5 rounded-2xl bg-card px-4 py-3 text-card-foreground shadow-sm">
+                    <SearchIcon className="h-5 w-5 text-muted-foreground" />
+                    <input
+                      type="search"
+                      value={searchQuery}
+                      onChange={(e) => setSearchQuery(e.target.value)}
+                      placeholder={
+                        activeTab === 'orders'
+                          ? 'Search order ID, student, or meal...'
+                          : 'Search your menu items...'
+                      }
+                      className="w-full bg-transparent text-sm placeholder:text-muted-foreground focus:outline-none"
+                    />
+                    {searchQuery && (
+                      <button
+                        type="button"
+                        onClick={() => setSearchQuery('')}
+                        className="rounded-full bg-secondary p-1 text-muted-foreground"
+                        aria-label="Clear search"
+                      >
+                        <CloseIcon className="h-3.5 w-3.5" />
+                      </button>
+                    )}
+                  </div>
+                )}
+              </header>
+
+              {/* TAB 1: ORDERS */}
+              {activeTab === 'orders' && (
+                <div>
+                  {/* Priority New Orders Banner when new orders are waiting */}
+                  {pendingOrdersCount > 0 && (
+                    <div className="mx-5 mt-4 flex items-center justify-between gap-3 rounded-2xl bg-accent/15 px-4 py-3 ring-1 ring-accent/40">
+                      <div className="flex items-center gap-2.5 min-w-0">
+                        <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-accent text-accent-foreground">
+                          <BellIcon className="h-4 w-4" />
+                        </span>
+                        <div className="min-w-0">
+                          <p className="text-xs font-extrabold text-foreground">
+                            {pendingOrdersCount} New Order
+                            {pendingOrdersCount === 1 ? '' : 's'} Waiting
+                          </p>
+                          <p className="truncate text-[11px] text-muted-foreground">
+                            Accept to start preparing for pickup
+                          </p>
+                        </div>
+                      </div>
+                      {orderFilter !== 'pending' && (
+                        <button
+                          type="button"
+                          onClick={() => setOrderFilter('pending')}
+                          className="shrink-0 rounded-full bg-accent px-3 py-1.5 text-[11px] font-bold text-accent-foreground shadow-sm"
+                        >
+                          View New
+                        </button>
+                      )}
+                    </div>
+                  )}
+
+                  {/* Compact 2-Card Summary Strip */}
+                  <div className="mt-4 grid grid-cols-2 gap-3 px-5">
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setOrderFilter(
+                          pendingOrdersCount > 0 ? 'pending' : 'all',
+                        )
+                      }
+                      className={cn(
+                        'rounded-3xl bg-card p-3.5 text-left shadow-sm ring-1 transition-colors',
+                        pendingOrdersCount > 0
+                          ? 'ring-accent/60'
+                          : 'ring-border',
+                      )}
+                    >
+                      <div className="flex items-center justify-between">
+                        <span className="text-xs font-medium text-muted-foreground">
+                          New Orders
+                        </span>
+                        <span
+                          className={cn(
+                            'flex h-7 w-7 items-center justify-center rounded-full',
+                            pendingOrdersCount > 0
+                              ? 'bg-accent text-accent-foreground'
+                              : 'bg-primary/10 text-primary',
+                          )}
+                        >
+                          <BellIcon className="h-4 w-4" />
+                        </span>
+                      </div>
+                      <p className="mt-1.5 text-xl font-extrabold text-foreground">
+                        {pendingOrdersCount}
+                      </p>
+                      <p className="text-[11px] text-muted-foreground">
+                        {activeOrdersCount} active in kitchen
+                      </p>
+                    </button>
+
+                    <div className="rounded-3xl bg-card p-3.5 shadow-sm ring-1 ring-border">
+                      <div className="flex items-center justify-between">
+                        <span className="text-xs font-medium text-muted-foreground">
+                          Revenue
+                        </span>
+                        <span className="flex h-7 w-7 items-center justify-center rounded-full bg-primary/10 text-primary">
+                          <TrendingUpIcon className="h-4 w-4" />
+                        </span>
+                      </div>
+                      <p className="mt-1.5 truncate text-xl font-extrabold text-foreground">
+                        {formatPrice(totalRevenue)}
+                      </p>
+                      <p className="text-[11px] text-muted-foreground">
+                        {orders.length} total orders
+                      </p>
+                    </div>
+                  </div>
+
+                  {/* Order Status Filter Pills with Live Counts */}
+                  <div className="no-scrollbar mt-4 flex gap-2 overflow-x-auto px-5 pb-1">
+                    {orderFilters.map((f) => {
+                      const active = orderFilter === f.key
+                      const count = filterCounts[f.key]
+                      return (
+                        <button
+                          key={f.key}
+                          type="button"
+                          onClick={() => setOrderFilter(f.key)}
+                          className={cn(
+                            'inline-flex shrink-0 items-center gap-1.5 rounded-full px-3.5 py-2 text-xs font-semibold transition-colors',
+                            active
+                              ? 'bg-primary text-primary-foreground shadow-sm'
+                              : f.key === 'pending' && count > 0
+                                ? 'bg-accent/15 text-foreground ring-1 ring-accent/40'
+                                : 'bg-card text-foreground ring-1 ring-border',
+                          )}
+                        >
+                          <span>{f.label}</span>
+                          <span
+                            className={cn(
+                              'rounded-full px-1.5 py-0.2 text-[10px] font-extrabold',
+                              active
+                                ? 'bg-primary-foreground/20 text-primary-foreground'
+                                : f.key === 'pending' && count > 0
+                                  ? 'bg-accent text-accent-foreground'
+                                  : 'bg-secondary text-muted-foreground',
+                            )}
+                          >
+                            {count}
+                          </span>
+                        </button>
+                      )
+                    })}
+                  </div>
+
+                  {/* Orders List (New Orders always sorted to the top) */}
+                  <div className="mt-4 flex flex-col gap-3 px-5">
+                    {isLoadingOrders ? (
+                      <div className="rounded-3xl bg-card p-10 text-center shadow-sm ring-1 ring-border">
+                        <div className="mx-auto h-7 w-7 animate-spin rounded-full border-4 border-primary border-t-transparent" />
+                        <p className="mt-3 text-xs font-medium text-muted-foreground">
+                          Loading live orders...
+                        </p>
+                      </div>
+                    ) : filteredOrders.length > 0 ? (
+                      filteredOrders.map((order) => {
+                        const isNewOrder = order.status === 'pending'
+                        const statusInfo =
+                          statusStyles[order.status as OrderStatus] ||
+                          statusStyles.pending
+                        const isPaid = order.paymentStatus === 'paid'
+
+                        return (
+                          <div
+                            key={order.id}
+                            className={cn(
+                              'flex flex-col gap-3 rounded-3xl bg-card p-4 shadow-sm transition-all',
+                              isNewOrder
+                                ? 'ring-2 ring-accent shadow-md'
+                                : 'ring-1 ring-border',
+                            )}
+                          >
+                            {/* Top Row: ID + Customer + Status Badge */}
+                            <div className="flex items-start justify-between gap-2">
+                              <div className="min-w-0">
+                                <div className="flex items-center gap-2">
+                                  <h3 className="text-base font-extrabold text-card-foreground">
+                                    {order.orderId || order.id.slice(0, 8)}
+                                  </h3>
+                                  {isPaid ? (
+                                    <span className="inline-flex items-center gap-1 rounded-full bg-primary/10 px-2 py-0.5 text-[10px] font-bold text-primary">
+                                      <CheckIcon className="h-3 w-3" />
+                                      <span>Paid</span>
+                                    </span>
+                                  ) : (
+                                    <span className="rounded-full bg-secondary px-2 py-0.5 text-[10px] font-semibold text-muted-foreground">
+                                      Cash
+                                    </span>
+                                  )}
+                                </div>
+                                <p className="mt-0.5 truncate text-xs text-muted-foreground">
+                                  {order.customerName || 'Campus Student'} ·{' '}
+                                  {order.pickupTime || storePickupTime}
+                                </p>
+                              </div>
+
+                              <span
+                                className={cn(
+                                  'shrink-0 rounded-full px-2.5 py-1 text-[11px] font-bold',
+                                  isNewOrder
+                                    ? 'bg-accent text-accent-foreground'
+                                    : statusInfo.pill,
+                                )}
+                              >
+                                {isNewOrder ? 'New Order' : statusInfo.label}
+                              </span>
                             </div>
-                            <div className="mt-1">
-                              {order.paymentStatus === 'paid' ? (
-                                <span
-                                  title={order.paymentReference ? `Ref: ${order.paymentReference}` : 'Verified by Paystack'}
-                                  className="inline-flex items-center gap-1 rounded-md bg-emerald-500/10 px-2 py-0.5 text-[10px] font-bold text-emerald-700"
+
+                            {/* Items Box */}
+                            <div className="flex flex-col gap-1.5 rounded-2xl bg-secondary/60 p-3">
+                              {(order.items || []).map((it: any, idx: number) => (
+                                <div
+                                  key={`${order.id}-item-${idx}`}
+                                  className="flex items-start justify-between gap-2 text-xs"
                                 >
-                                  ✓ Paid (Paystack)
-                                </span>
-                              ) : (
-                                <span className="inline-flex items-center gap-1 rounded-md bg-amber-500/10 px-2 py-0.5 text-[10px] font-bold text-amber-700">
-                                  Cash on Pickup
-                                </span>
-                              )}
+                                  <div className="min-w-0">
+                                    <span className="font-bold text-foreground">
+                                      {it.quantity}x {it.name}
+                                    </span>
+                                    {Array.isArray(it.modifiers) &&
+                                      it.modifiers.length > 0 && (
+                                        <p className="truncate text-[11px] text-muted-foreground">
+                                          {it.modifiers
+                                            .map((m: any) => m.label)
+                                            .filter(Boolean)
+                                            .join(', ')}
+                                        </p>
+                                      )}
+                                  </div>
+                                  {Number(it.price) > 0 && (
+                                    <span className="shrink-0 font-semibold text-muted-foreground">
+                                      {formatPrice(
+                                        Number(it.price) *
+                                          (Number(it.quantity) || 1),
+                                      )}
+                                    </span>
+                                  )}
+                                </div>
+                              ))}
                             </div>
-                          </td>
-                          <td className="px-6 py-4">
-                            <span
-                              className={`inline-flex items-center rounded-full px-2.5 py-1 text-[11px] ${
-                                statusColors[order.status as OrderStatus] || 'bg-muted text-muted-foreground'
-                              }`}
-                            >
-                              {order.status?.charAt(0).toUpperCase() + order.status?.slice(1) || 'Pending'}
-                            </span>
-                          </td>
-                          <td className="px-6 py-4 text-right">
-                            <div className="flex items-center justify-end gap-2">
+
+                            {/* Total + Action Row */}
+                            <div className="flex items-center justify-between gap-3 pt-0.5">
+                              <div>
+                                <span className="block text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+                                  Total
+                                </span>
+                                <span className="text-base font-extrabold text-foreground">
+                                  {formatPrice(order.total)}
+                                </span>
+                              </div>
+
                               {order.status === 'pending' && (
                                 <button
                                   type="button"
-                                  onClick={() => handleStatusUpdate(order.id, 'preparing')}
-                                  className="rounded-xl bg-blue-600 px-3 py-1.5 text-xs font-bold text-white shadow-sm hover:bg-blue-700 active:scale-95 transition-all"
+                                  onClick={() =>
+                                    handleStatusUpdate(order.id, 'preparing')
+                                  }
+                                  className="rounded-full bg-primary px-5 py-2.5 text-xs font-bold text-primary-foreground shadow-sm transition-transform active:scale-95"
                                 >
                                   Accept & Prepare
                                 </button>
@@ -469,281 +733,500 @@ export default function StoreOwnerDashboard() {
                               {order.status === 'preparing' && (
                                 <button
                                   type="button"
-                                  onClick={() => handleStatusUpdate(order.id, 'ready')}
-                                  className="rounded-xl bg-amber-500 px-3 py-1.5 text-xs font-bold text-white shadow-sm hover:bg-amber-600 active:scale-95 transition-all animate-pulse"
+                                  onClick={() =>
+                                    handleStatusUpdate(order.id, 'ready')
+                                  }
+                                  className="inline-flex items-center gap-1.5 rounded-full bg-accent px-5 py-2.5 text-xs font-bold text-accent-foreground shadow-sm transition-transform active:scale-95"
                                 >
-                                  🔔 Mark as Ready
+                                  <BellIcon className="h-3.5 w-3.5" />
+                                  <span>Mark Ready</span>
                                 </button>
                               )}
                               {order.status === 'ready' && (
                                 <button
                                   type="button"
-                                  onClick={() => handleStatusUpdate(order.id, 'completed')}
-                                  className="rounded-xl bg-emerald-600 px-3 py-1.5 text-xs font-bold text-white shadow-sm hover:bg-emerald-700 active:scale-95 transition-all"
+                                  onClick={() =>
+                                    handleStatusUpdate(order.id, 'completed')
+                                  }
+                                  className="inline-flex items-center gap-1.5 rounded-full bg-primary px-5 py-2.5 text-xs font-bold text-primary-foreground shadow-sm transition-transform active:scale-95"
                                 >
-                                  ✓ Mark as Collected
+                                  <CheckIcon className="h-3.5 w-3.5" />
+                                  <span>Mark Collected</span>
                                 </button>
                               )}
                               {order.status === 'completed' && (
-                                <span className="flex items-center gap-1 rounded-full bg-emerald-500/10 px-2.5 py-1 text-xs font-bold text-emerald-600">
-                                  <CheckIcon className="h-4 w-4" /> Collected
+                                <span className="inline-flex items-center gap-1 rounded-full bg-primary/10 px-3.5 py-1.5 text-xs font-bold text-primary">
+                                  <CheckIcon className="h-3.5 w-3.5" />
+                                  <span>Completed</span>
                                 </span>
                               )}
-                              {order.status === 'cancelled' && (
-                                <span className="text-xs font-semibold text-destructive">Cancelled</span>
-                              )}
                             </div>
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                ) : (
-                  <div className="p-12 text-center text-muted-foreground">
-                    <BagIcon className="mx-auto h-12 w-12 opacity-20" />
-                    <h3 className="mt-4 text-lg font-bold text-foreground">No orders yet</h3>
-                    <p className="mt-2 text-sm text-muted-foreground max-w-sm mx-auto">
-                      When students place orders, they will appear here.
-                    </p>
+                          </div>
+                        )
+                      })
+                    ) : (
+                      <div className="rounded-3xl bg-card p-8 text-center shadow-sm ring-1 ring-border">
+                        <span className="mx-auto flex h-14 w-14 items-center justify-center rounded-full bg-secondary text-muted-foreground">
+                          <BagIcon className="h-7 w-7" />
+                        </span>
+                        <p className="mt-3 text-base font-bold text-foreground">
+                          No orders found
+                        </p>
+                        <p className="mx-auto mt-1 max-w-xs text-xs text-muted-foreground">
+                          Student orders placed for {merchantName} will appear here in real time.
+                        </p>
+                      </div>
+                    )}
                   </div>
-                )}
-              </div>
-            ) : (
-              <div className="p-0">
-                {allProducts.length > 0 ? (
-                  <div className="overflow-x-auto">
-                    <table className="w-full text-left text-sm">
-                      <thead className="bg-muted/30 text-muted-foreground uppercase tracking-wider text-[11px] font-semibold">
-                        <tr>
-                          <th className="px-6 py-4">Product Name</th>
-                          <th className="px-6 py-4">Category</th>
-                          <th className="px-6 py-4">Base Price</th>
-                          <th className="px-6 py-4 text-right">Action</th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-border/50">
-                        {allProducts.map((p) => (
-                          <tr key={p.id} className="hover:bg-muted/30 transition-colors">
-                            <td className="px-6 py-4 font-bold text-foreground">
-                              <div className="flex items-center gap-3">
+                </div>
+              )}
+
+              {/* TAB 2: MENU / PRODUCTS */}
+              {activeTab === 'products' && (
+                <div className="mt-5 px-5">
+                  <div className="mb-3 flex items-center justify-between">
+                    <div>
+                      <h2 className="text-lg font-extrabold tracking-tight text-foreground">
+                        Menu Catalog
+                      </h2>
+                      <p className="text-xs text-muted-foreground">
+                        {allProducts.length} item{allProducts.length === 1 ? '' : 's'} live on campus
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setEditingProduct(null)
+                        setIsModalOpen(true)
+                      }}
+                      className="inline-flex items-center gap-1.5 rounded-full bg-primary px-4 py-2 text-xs font-bold text-primary-foreground shadow-sm transition-transform active:scale-95"
+                    >
+                      <PlusIcon className="h-4 w-4" />
+                      <span>Add Item</span>
+                    </button>
+                  </div>
+
+                  <div className="flex flex-col gap-3">
+                    {filteredProducts.length > 0 ? (
+                      filteredProducts.map((p) => {
+                        const modCount = Array.isArray(p.modifierGroups)
+                          ? p.modifierGroups.length
+                          : 0
+
+                        return (
+                          <div
+                            key={p.id}
+                            className="flex flex-col gap-3 rounded-3xl bg-card p-3.5 shadow-sm ring-1 ring-border"
+                          >
+                            <div className="flex gap-3.5">
+                              <div className="flex min-w-0 flex-1 flex-col">
+                                <div className="flex items-center gap-1.5">
+                                  <span className="rounded-full bg-secondary px-2 py-0.5 text-[10px] font-bold text-muted-foreground">
+                                    {p.category || 'Menu'}
+                                  </span>
+                                  {modCount > 0 && (
+                                    <span className="rounded-full bg-primary/10 px-2 py-0.5 text-[10px] font-bold text-primary">
+                                      +{modCount} option{modCount === 1 ? '' : 's'}
+                                    </span>
+                                  )}
+                                </div>
+
+                                <h3 className="mt-1 truncate text-base font-bold text-card-foreground">
+                                  {p.name}
+                                </h3>
+
+                                {p.description && (
+                                  <p className="mt-0.5 line-clamp-2 text-xs text-muted-foreground">
+                                    {p.description}
+                                  </p>
+                                )}
+
+                                <p className="mt-auto pt-2 text-sm font-extrabold text-primary">
+                                  {formatPrice(p.price)}
+                                </p>
+                              </div>
+
+                              <div className="relative h-24 w-24 shrink-0 overflow-hidden rounded-2xl bg-secondary ring-1 ring-border">
                                 {p.images && p.images.length > 0 ? (
-                                  // eslint-disable-next-line @next/next/no-img-element
-                                  <img
+                                  <Image
                                     src={p.images[0]}
                                     alt={p.name}
-                                    className="h-10 w-10 shrink-0 rounded-lg object-cover ring-1 ring-border"
+                                    fill
+                                    className="object-cover"
                                   />
                                 ) : (
-                                  <div className="h-10 w-10 shrink-0 rounded-lg bg-muted flex items-center justify-center ring-1 ring-border text-[10px] uppercase font-bold text-muted-foreground">
-                                    Img
+                                  <div className="flex h-full w-full items-center justify-center text-muted-foreground">
+                                    <PackageIcon className="h-6 w-6 opacity-40" />
                                   </div>
                                 )}
-                                <span>{p.name}</span>
                               </div>
-                            </td>
-                            <td className="px-6 py-4 text-muted-foreground">{p.category}</td>
-                            <td className="px-6 py-4 font-bold text-primary">
-                              {editingProductId === p.id ? (
-                                <div className="flex items-center gap-1.5">
-                                  <span className="text-xs font-bold text-muted-foreground">R</span>
-                                  <input
-                                    type="number"
-                                    step="any"
-                                    min="0"
-                                    value={editingPriceValue}
-                                    onChange={(e) => setEditingPriceValue(e.target.value)}
-                                    className="w-24 rounded-lg border bg-background px-2 py-1 text-sm font-bold outline-none focus:border-primary"
-                                    autoFocus
-                                  />
-                                  <button
-                                    type="button"
-                                    onClick={() => handleSavePrice(p.id)}
-                                    disabled={isUpdatingPrice}
-                                    className="rounded bg-primary px-2 py-1 text-xs font-bold text-primary-foreground hover:brightness-110 disabled:opacity-50"
-                                  >
-                                    Save
-                                  </button>
-                                  <button
-                                    type="button"
-                                    onClick={() => setEditingProductId(null)}
-                                    disabled={isUpdatingPrice}
-                                    className="rounded bg-muted px-2 py-1 text-xs font-bold text-muted-foreground hover:bg-muted/80"
-                                  >
-                                    ✕
-                                  </button>
-                                </div>
-                              ) : (
+                            </div>
+
+                            {/* Inline Price Editor or Action Bar */}
+                            {editingProductId === p.id ? (
+                              <div className="flex items-center gap-2 border-t border-border/60 pt-2.5">
+                                <span className="text-xs font-bold text-muted-foreground">
+                                  R
+                                </span>
+                                <input
+                                  type="number"
+                                  step="any"
+                                  min="0.01"
+                                  value={editingPriceValue}
+                                  onChange={(e) =>
+                                    setEditingPriceValue(e.target.value)
+                                  }
+                                  className="flex-1 rounded-xl border bg-background px-3 py-1.5 text-sm font-bold text-foreground outline-none focus:border-primary"
+                                  autoFocus
+                                />
+                                <button
+                                  type="button"
+                                  onClick={() => handleSavePrice(p.id)}
+                                  disabled={isUpdatingPrice}
+                                  className="rounded-full bg-primary px-4 py-1.5 text-xs font-bold text-primary-foreground"
+                                >
+                                  Save
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => setEditingProductId(null)}
+                                  disabled={isUpdatingPrice}
+                                  className="rounded-full bg-secondary px-3 py-1.5 text-xs font-bold text-muted-foreground"
+                                >
+                                  Cancel
+                                </button>
+                              </div>
+                            ) : (
+                              <div className="flex items-center justify-between border-t border-border/60 pt-2.5">
                                 <div className="flex items-center gap-2">
-                                  <span>{formatPrice(p.price)}</span>
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      setEditingProduct(p)
+                                      setIsModalOpen(true)
+                                    }}
+                                    className="inline-flex items-center gap-1.5 rounded-full bg-primary/10 px-3.5 py-1.5 text-xs font-bold text-primary"
+                                  >
+                                    <EditIcon className="h-3.5 w-3.5" />
+                                    <span>Edit Item</span>
+                                  </button>
                                   <button
                                     type="button"
                                     onClick={() => handleStartEditPrice(p)}
-                                    className="rounded-lg bg-secondary px-2 py-0.5 text-xs font-bold text-primary hover:bg-secondary/80 transition-colors"
+                                    className="rounded-full bg-secondary px-3.5 py-1.5 text-xs font-bold text-foreground"
                                   >
-                                    Edit Price
+                                    Change Price
                                   </button>
                                 </div>
-                              )}
-                            </td>
-                            <td className="px-6 py-4 text-right">
-                              <div className="flex items-center justify-end gap-2">
+
                                 <button
                                   type="button"
-                                  onClick={() => {
-                                    setEditingProduct(p)
-                                    setIsModalOpen(true)
-                                  }}
-                                  className="rounded-lg bg-secondary px-2.5 py-1 text-xs font-bold text-foreground hover:bg-secondary/80 transition-colors"
-                                >
-                                  Edit Details
-                                </button>
-                                <button 
-                                  type="button"
-                                  onClick={() => handleDeleteProduct(p.id, p.name)}
-                                  className="rounded p-1 text-muted-foreground hover:bg-muted hover:text-destructive transition-colors"
-                                  title="Delete product"
+                                  onClick={() =>
+                                    handleDeleteProduct(p.id, p.name)
+                                  }
+                                  className="flex h-8 w-8 items-center justify-center rounded-full bg-secondary text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive"
+                                  aria-label={`Delete ${p.name}`}
                                 >
                                   <TrashIcon className="h-4 w-4" />
                                 </button>
                               </div>
-                            </td>
-                          </tr>
+                            )}
+                          </div>
+                        )
+                      })
+                    ) : (
+                      <div className="rounded-3xl bg-card p-8 text-center shadow-sm ring-1 ring-border">
+                        <span className="mx-auto flex h-14 w-14 items-center justify-center rounded-full bg-secondary text-muted-foreground">
+                          <PackageIcon className="h-7 w-7" />
+                        </span>
+                        <p className="mt-3 text-base font-bold text-foreground">
+                          Your menu is empty
+                        </p>
+                        <p className="mx-auto mt-1 max-w-xs text-xs text-muted-foreground">
+                          Add your meals with photos and prices so students can start ordering.
+                        </p>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setEditingProduct(null)
+                            setIsModalOpen(true)
+                          }}
+                          className="mt-4 inline-flex items-center gap-1.5 rounded-full bg-primary px-5 py-2.5 text-xs font-bold text-primary-foreground shadow-sm"
+                        >
+                          <PlusIcon className="h-4 w-4" />
+                          <span>Add First Item</span>
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
+
+              {/* TAB 3: STORE DETAILS & SETTINGS */}
+              {activeTab === 'store' && (
+                <div className="mt-5 px-5">
+                  <h2 className="text-lg font-extrabold tracking-tight text-foreground">
+                    Store Settings
+                  </h2>
+                  <p className="mt-0.5 text-xs text-muted-foreground">
+                    Configure how students see and find {merchantName} on campus.
+                  </p>
+
+                  <form
+                    onSubmit={handleSaveStoreSettings}
+                    className="mt-4 flex flex-col gap-4 rounded-3xl bg-card p-5 shadow-sm ring-1 ring-border"
+                  >
+                    <div className="flex flex-col gap-1.5">
+                      <label className="text-xs font-bold text-foreground">
+                        Store / Business Name
+                      </label>
+                      <input
+                        type="text"
+                        required
+                        value={newStoreName}
+                        onChange={(e) => setNewStoreName(e.target.value)}
+                        placeholder="e.g. Campus Grill"
+                        className="w-full rounded-2xl border bg-background px-4 py-3 text-sm outline-none focus:border-primary focus:ring-1 focus:ring-primary"
+                      />
+                    </div>
+
+                    <div className="flex flex-col gap-1.5">
+                      <label className="text-xs font-bold text-foreground">
+                        Campus
+                      </label>
+                      <select
+                        value={newStoreCampusId}
+                        onChange={(e) => setNewStoreCampusId(e.target.value)}
+                        className="w-full rounded-2xl border bg-background px-4 py-3 text-sm outline-none focus:border-primary focus:ring-1 focus:ring-primary"
+                      >
+                        <option value="all">All Campuses</option>
+                        {campuses.map((c) => (
+                          <option key={c.id} value={c.id}>
+                            {c.name} ({c.short})
+                          </option>
                         ))}
-                      </tbody>
-                    </table>
-                  </div>
-                ) : (
-                  <div className="p-12 text-center text-muted-foreground">
-                    <PackageIcon className="mx-auto h-12 w-12 opacity-20" />
-                    <h3 className="mt-4 text-lg font-bold text-foreground">Your catalog is empty</h3>
-                    <p className="mt-2 text-sm text-muted-foreground max-w-sm mx-auto">
-                      Products you add will appear here. Students from your campus will be able to order them.
+                      </select>
+                    </div>
+
+                    <div className="flex flex-col gap-1.5">
+                      <label className="text-xs font-bold text-foreground">
+                        Specific Pickup Spot
+                      </label>
+                      <input
+                        type="text"
+                        value={newStoreLocation}
+                        onChange={(e) => setNewStoreLocation(e.target.value)}
+                        placeholder="e.g. Student Centre, Shop 4"
+                        className="w-full rounded-2xl border bg-background px-4 py-3 text-sm outline-none focus:border-primary focus:ring-1 focus:ring-primary"
+                      />
+                    </div>
+
+                    <div className="flex flex-col gap-1.5">
+                      <label className="text-xs font-bold text-foreground">
+                        Estimated Prep Time
+                      </label>
+                      <input
+                        type="text"
+                        value={newStorePickupTime}
+                        onChange={(e) => setNewStorePickupTime(e.target.value)}
+                        placeholder="e.g. 10-15 min"
+                        className="w-full rounded-2xl border bg-background px-4 py-3 text-sm outline-none focus:border-primary focus:ring-1 focus:ring-primary"
+                      />
+                    </div>
+
+                    <button
+                      type="submit"
+                      disabled={isSavingStore || !newStoreName.trim()}
+                      className="mt-2 flex w-full items-center justify-center gap-2 rounded-full bg-primary py-3.5 text-sm font-bold text-primary-foreground shadow-sm transition-transform active:scale-95 disabled:opacity-50"
+                    >
+                      {savedStoreSuccess ? (
+                        <>
+                          <CheckIcon className="h-4 w-4" />
+                          <span>Store Settings Saved</span>
+                        </>
+                      ) : isSavingStore ? (
+                        <span>Saving...</span>
+                      ) : (
+                        <span>Save Store Settings</span>
+                      )}
+                    </button>
+                  </form>
+                </div>
+              )}
+
+              {/* TAB 4: ACCOUNT */}
+              {activeTab === 'account' && (
+                <div className="mt-5 px-5">
+                  <div className="flex flex-col items-center rounded-3xl bg-card p-6 text-center shadow-sm ring-1 ring-border">
+                    <div className="flex h-20 w-20 items-center justify-center rounded-full bg-primary/10 text-2xl font-extrabold text-primary">
+                      {merchantName.slice(0, 2).toUpperCase()}
+                    </div>
+                    <h2 className="mt-3 text-lg font-extrabold text-foreground">
+                      {merchantName}
+                    </h2>
+                    <p className="text-xs text-muted-foreground">
+                      {currentUser?.email}
                     </p>
+                    <span className="mt-2.5 inline-flex items-center gap-1.5 rounded-full bg-primary/10 px-3 py-1 text-xs font-bold text-primary">
+                      <StoreIcon className="h-3.5 w-3.5" />
+                      <span>Verified Store Owner</span>
+                    </span>
                   </div>
-                )}
-              </div>
-            )}
-          </div>
-        </div>
-      </main>
 
-      {/* Add / Edit Product Modal Overlay */}
-      {isModalOpen && (
-        <AddProductModal 
-          initialProduct={editingProduct}
-          onClose={() => {
-            setIsModalOpen(false)
-            setEditingProduct(null)
-          }} 
-          onSave={handleProductSaved} 
-        />
-      )}
-      {/* Edit Store Details & Location Modal */}
-      {isEditingStoreName && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm">
-          <div className="w-full max-w-lg rounded-3xl bg-card p-6 shadow-xl ring-1 ring-border">
-            <h2 className="text-xl font-extrabold text-foreground">Store Details & Location</h2>
-            <p className="mt-1 text-xs text-muted-foreground">
-              Configure your store name, primary campus, and pickup location so students can easily locate your store.
-            </p>
-            
-            <div className="mt-5 flex flex-col gap-4">
-              <div className="flex flex-col gap-1.5">
-                <label className="text-xs font-bold text-foreground">Store / Business Name</label>
-                <input
-                  type="text"
-                  value={newStoreName}
-                  onChange={(e) => setNewStoreName(e.target.value)}
-                  placeholder="e.g. UJ Campus Grill"
-                  className="w-full rounded-2xl border bg-background px-4 py-2.5 text-sm outline-none focus:border-primary focus:ring-1 focus:ring-primary shadow-sm"
-                />
-              </div>
+                  <div className="mt-4 flex flex-col gap-3">
+                    <button
+                      type="button"
+                      onClick={() => setActiveTab('store')}
+                      className="flex w-full items-center gap-3 rounded-2xl bg-card p-4 text-left shadow-sm ring-1 ring-border"
+                    >
+                      <span className="flex h-10 w-10 items-center justify-center rounded-full bg-primary/10 text-primary">
+                        <PinIcon className="h-5 w-5" />
+                      </span>
+                      <div className="min-w-0 flex-1">
+                        <span className="block text-sm font-bold text-foreground">
+                          Store Location & Pickup
+                        </span>
+                        <span className="block truncate text-xs text-muted-foreground">
+                          {storeLocation} · {campusShort}
+                        </span>
+                      </div>
+                    </button>
 
-              <div className="flex flex-col gap-1.5">
-                <label className="text-xs font-bold text-foreground">Campus</label>
-                <select
-                  value={newStoreCampusId}
-                  onChange={(e) => setNewStoreCampusId(e.target.value)}
-                  className="w-full rounded-2xl border bg-background px-4 py-2.5 text-sm outline-none focus:border-primary focus:ring-1 focus:ring-primary shadow-sm"
-                >
-                  <option value="all">All Campuses</option>
-                  {campuses.map((c) => (
-                    <option key={c.id} value={c.id}>
-                      {c.name} ({c.short}) - {c.location}
-                    </option>
-                  ))}
-                </select>
-              </div>
+                    <button
+                      type="button"
+                      onClick={() => setActiveTab('products')}
+                      className="flex w-full items-center gap-3 rounded-2xl bg-card p-4 text-left shadow-sm ring-1 ring-border"
+                    >
+                      <span className="flex h-10 w-10 items-center justify-center rounded-full bg-primary/10 text-primary">
+                        <PackageIcon className="h-5 w-5" />
+                      </span>
+                      <div className="min-w-0 flex-1">
+                        <span className="block text-sm font-bold text-foreground">
+                          Manage Menu Catalog
+                        </span>
+                        <span className="block text-xs text-muted-foreground">
+                          {allProducts.length} active product
+                          {allProducts.length === 1 ? '' : 's'}
+                        </span>
+                      </div>
+                    </button>
 
-              <div className="flex flex-col gap-1.5">
-                <label className="text-xs font-bold text-foreground">Specific Campus Location / Spot</label>
-                <input
-                  type="text"
-                  value={newStoreLocation}
-                  onChange={(e) => setNewStoreLocation(e.target.value)}
-                  placeholder="e.g. Student Centre, Shop 4 or Madibeng Building"
-                  className="w-full rounded-2xl border bg-background px-4 py-2.5 text-sm outline-none focus:border-primary focus:ring-1 focus:ring-primary shadow-sm"
-                />
-                <span className="text-[11px] text-muted-foreground">
-                  Where students should collect their meals (building, floor, or booth).
-                </span>
-              </div>
+                    <button
+                      type="button"
+                      onClick={handleSignOut}
+                      className="mt-2 flex w-full items-center gap-3 rounded-2xl border border-destructive/20 bg-destructive/5 p-4 text-left font-bold text-destructive"
+                    >
+                      <span className="flex h-10 w-10 items-center justify-center rounded-full bg-destructive/10">
+                        <LogOutIcon className="h-5 w-5" />
+                      </span>
+                      <span className="text-sm">Sign out</span>
+                    </button>
+                  </div>
+                </div>
+              )}
+            </main>
 
-              <div className="flex flex-col gap-1.5">
-                <label className="text-xs font-bold text-foreground">Estimated Pickup Time</label>
-                <input
-                  type="text"
-                  value={newStorePickupTime}
-                  onChange={(e) => setNewStorePickupTime(e.target.value)}
-                  placeholder="e.g. 10-15 min"
-                  className="w-full rounded-2xl border bg-background px-4 py-2.5 text-sm outline-none focus:border-primary focus:ring-1 focus:ring-primary shadow-sm"
-                />
-              </div>
-            </div>
+            {/* Bottom Navigation Bar (matches Student BottomNav) */}
+            <nav className="border-t border-border bg-card/95 backdrop-blur">
+              <ul className="mx-auto flex max-w-md items-stretch justify-between px-2 pb-6 pt-2">
+                <li className="flex-1">
+                  <button
+                    type="button"
+                    onClick={() => setActiveTab('orders')}
+                    className={cn(
+                      'relative flex w-full flex-col items-center gap-1 rounded-xl py-1.5 text-[11px] font-medium transition-colors',
+                      activeTab === 'orders'
+                        ? 'text-primary'
+                        : 'text-muted-foreground',
+                    )}
+                  >
+                    <span className="relative">
+                      <ReceiptIcon className="h-6 w-6" />
+                      {activeOrdersCount > 0 && (
+                        <span className="absolute -right-2 -top-1.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-accent px-1 text-[10px] font-bold text-accent-foreground">
+                          {activeOrdersCount}
+                        </span>
+                      )}
+                    </span>
+                    Orders
+                  </button>
+                </li>
 
-            <div className="mt-6 flex justify-end gap-3 border-t pt-4">
-              <button
-                type="button"
-                onClick={() => setIsEditingStoreName(false)}
-                disabled={isSavingName}
-                className="rounded-xl px-4 py-2 text-sm font-bold text-muted-foreground hover:bg-muted"
-              >
-                Cancel
-              </button>
-              <button
-                type="button"
-                onClick={handleSaveStoreSettings}
-                disabled={isSavingName || !newStoreName.trim()}
-                className="rounded-xl bg-primary px-5 py-2 text-sm font-bold text-primary-foreground shadow-sm hover:brightness-110 active:scale-95 disabled:opacity-50"
-              >
-                {isSavingName ? 'Saving...' : 'Save Settings'}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-    </div>
-  )
-}
+                <li className="flex-1">
+                  <button
+                    type="button"
+                    onClick={() => setActiveTab('products')}
+                    className={cn(
+                      'relative flex w-full flex-col items-center gap-1 rounded-xl py-1.5 text-[11px] font-medium transition-colors',
+                      activeTab === 'products'
+                        ? 'text-primary'
+                        : 'text-muted-foreground',
+                    )}
+                  >
+                    <PackageIcon className="h-6 w-6" />
+                    Menu
+                  </button>
+                </li>
 
-function StatCard({ title, value, icon }: { title: string; value: string; icon: React.ReactNode }) {
-  return (
-    <div className="flex flex-col gap-3 rounded-3xl bg-card p-5 shadow-sm ring-1 ring-border transition-all hover:shadow-md">
-      <div className="flex items-center justify-between">
-        <h3 className="text-sm font-semibold text-muted-foreground">{title}</h3>
-        <div className="rounded-full bg-background p-2 ring-1 ring-border">{icon}</div>
+                <li className="flex-1">
+                  <button
+                    type="button"
+                    onClick={() => setActiveTab('store')}
+                    className={cn(
+                      'relative flex w-full flex-col items-center gap-1 rounded-xl py-1.5 text-[11px] font-medium transition-colors',
+                      activeTab === 'store'
+                        ? 'text-primary'
+                        : 'text-muted-foreground',
+                    )}
+                  >
+                    <StoreIcon className="h-6 w-6" />
+                    Store
+                  </button>
+                </li>
+
+                <li className="flex-1">
+                  <button
+                    type="button"
+                    onClick={() => setActiveTab('account')}
+                    className={cn(
+                      'relative flex w-full flex-col items-center gap-1 rounded-xl py-1.5 text-[11px] font-medium transition-colors',
+                      activeTab === 'account'
+                        ? 'text-primary'
+                        : 'text-muted-foreground',
+                    )}
+                  >
+                    <UserIcon className="h-6 w-6" />
+                    Account
+                  </button>
+                </li>
+              </ul>
+            </nav>
+
+            {/* Add / Edit Product BottomSheet inside the Phone Frame */}
+            <AddProductSheet
+              open={isModalOpen}
+              initialProduct={editingProduct}
+              onClose={() => {
+                setIsModalOpen(false)
+                setEditingProduct(null)
+              }}
+              onSave={handleProductSaved}
+            />
+          </>
+        )}
       </div>
-      <p className="text-2xl font-extrabold tracking-tight text-foreground">{value}</p>
     </div>
   )
 }
-
-// ============================================================
-// ADD PRODUCT MODAL (same as before, with custom icons)
-// ============================================================
 
 type ModifierOption = { id: string; label: string; price: string }
-type ModifierGroup = { id: string; title: string; required: boolean; type: 'single' | 'multi'; options: ModifierOption[] }
+type ModifierGroup = {
+  id: string
+  title: string
+  required: boolean
+  type: 'single' | 'multi'
+  options: ModifierOption[]
+}
 
 const PRODUCT_CATEGORY_OPTIONS = [
   'Burgers',
@@ -760,36 +1243,46 @@ const PRODUCT_CATEGORY_OPTIONS = [
   'Desserts',
 ]
 
-function AddProductModal({ 
+function AddProductSheet({
+  open,
   initialProduct,
-  onClose, 
-  onSave 
-}: { 
+  onClose,
+  onSave,
+}: {
+  open: boolean
   initialProduct?: any
   onClose: () => void
-  onSave: (data: any, files: File[]) => Promise<void> 
+  onSave: (data: any, files: File[]) => Promise<void>
 }) {
-  const [name, setName] = useState(initialProduct?.name || '')
-  const [description, setDescription] = useState(initialProduct?.description || '')
-  const [price, setPrice] = useState(initialProduct ? initialProduct.price.toString() : '')
-  
-  const initialCat = initialProduct?.category?.trim() || 'Burgers'
-  const isCustomInit = initialProduct?.category 
-    ? !PRODUCT_CATEGORY_OPTIONS.includes(initialCat)
-    : false
-
-  const [category, setCategory] = useState(initialCat)
-  const [isCustomCategory, setIsCustomCategory] = useState(isCustomInit)
-  const [customCategoryInput, setCustomCategoryInput] = useState(isCustomInit ? initialCat : '')
+  const [name, setName] = useState('')
+  const [description, setDescription] = useState('')
+  const [price, setPrice] = useState('')
+  const [category, setCategory] = useState('Burgers')
+  const [isCustomCategory, setIsCustomCategory] = useState(false)
+  const [customCategoryInput, setCustomCategoryInput] = useState('')
   const [isSubmitting, setIsSubmitting] = useState(false)
-
-  const [existingImages, setExistingImages] = useState<string[]>(initialProduct?.images || [])
+  const [existingImages, setExistingImages] = useState<string[]>([])
   const [imageFiles, setImageFiles] = useState<File[]>([])
   const [imagePreviews, setImagePreviews] = useState<string[]>([])
+  const [modifierGroups, setModifierGroups] = useState<ModifierGroup[]>([])
 
-  const [modifierGroups, setModifierGroups] = useState<ModifierGroup[]>(
-    initialProduct?.modifierGroups || []
-  )
+  useEffect(() => {
+    if (!open) return
+    setName(initialProduct?.name || '')
+    setDescription(initialProduct?.description || '')
+    setPrice(initialProduct ? initialProduct.price.toString() : '')
+    const initialCat = initialProduct?.category?.trim() || 'Burgers'
+    const custom = initialProduct?.category
+      ? !PRODUCT_CATEGORY_OPTIONS.includes(initialCat)
+      : false
+    setCategory(initialCat)
+    setIsCustomCategory(custom)
+    setCustomCategoryInput(custom ? initialCat : '')
+    setExistingImages(initialProduct?.images || [])
+    setImageFiles([])
+    setImagePreviews([])
+    setModifierGroups(initialProduct?.modifierGroups || [])
+  }, [open, initialProduct])
 
   const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files) {
@@ -812,12 +1305,20 @@ function AddProductModal({
   const handleAddGroup = () => {
     setModifierGroups([
       ...modifierGroups,
-      { id: Math.random().toString(), title: '', required: false, type: 'single', options: [] },
+      {
+        id: Math.random().toString(),
+        title: '',
+        required: false,
+        type: 'single',
+        options: [],
+      },
     ])
   }
 
   const updateGroup = (id: string, updates: Partial<ModifierGroup>) => {
-    setModifierGroups(modifierGroups.map((g) => (g.id === id ? { ...g, ...updates } : g)))
+    setModifierGroups(
+      modifierGroups.map((g) => (g.id === id ? { ...g, ...updates } : g)),
+    )
   }
 
   const removeGroup = (id: string) => {
@@ -828,21 +1329,36 @@ function AddProductModal({
     setModifierGroups(
       modifierGroups.map((g) => {
         if (g.id === groupId) {
-          return { ...g, options: [...g.options, { id: Math.random().toString(), label: '', price: '0' }] }
+          return {
+            ...g,
+            options: [
+              ...g.options,
+              { id: Math.random().toString(), label: '', price: '0' },
+            ],
+          }
         }
         return g
-      })
+      }),
     )
   }
 
-  const updateOption = (groupId: string, optionId: string, updates: Partial<ModifierOption>) => {
+  const updateOption = (
+    groupId: string,
+    optionId: string,
+    updates: Partial<ModifierOption>,
+  ) => {
     setModifierGroups(
       modifierGroups.map((g) => {
         if (g.id === groupId) {
-          return { ...g, options: g.options.map((o) => (o.id === optionId ? { ...o, ...updates } : o)) }
+          return {
+            ...g,
+            options: g.options.map((o) =>
+              o.id === optionId ? { ...o, ...updates } : o,
+            ),
+          }
         }
         return g
-      })
+      }),
     )
   }
 
@@ -850,10 +1366,13 @@ function AddProductModal({
     setModifierGroups(
       modifierGroups.map((g) => {
         if (g.id === groupId) {
-          return { ...g, options: g.options.filter((o) => o.id !== optionId) }
+          return {
+            ...g,
+            options: g.options.filter((o) => o.id !== optionId),
+          }
         }
         return g
-      })
+      }),
     )
   }
 
@@ -861,364 +1380,340 @@ function AddProductModal({
     e.preventDefault()
     setIsSubmitting(true)
     await onSave(
-      { 
-        name, 
-        description, 
-        price: parseFloat(price) || 0, 
-        category, 
+      {
+        name,
+        description,
+        price: parseFloat(price) || 0,
+        category,
         modifierGroups,
-        images: existingImages 
+        images: existingImages,
       },
-      imageFiles
+      imageFiles,
     )
     setIsSubmitting(false)
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-      <div className="absolute inset-0 bg-foreground/30 backdrop-blur-sm" onClick={onClose} />
-      <div className="relative w-full max-w-2xl max-h-[90dvh] flex flex-col rounded-[2rem] bg-card shadow-2xl">
-        <div className="flex items-center justify-between border-b px-6 py-5">
-          <h2 className="text-xl font-extrabold tracking-tight text-foreground">
-            {initialProduct ? 'Edit Product' : 'Add New Product'}
-          </h2>
-          <button
-            type="button"
-            onClick={onClose}
-            className="rounded-full bg-muted p-2 text-muted-foreground hover:bg-muted/80 transition-colors"
-          >
-            <CloseIcon className="h-5 w-5" />
-          </button>
-        </div>
-
-        <div className="flex-1 overflow-y-auto p-6 scroll-smooth">
-          <form id="add-product-form" onSubmit={handleSubmit} className="flex flex-col gap-8">
-            {/* Product Images */}
-            <div className="flex flex-col gap-5">
-              <div className="flex items-center justify-between">
-                <h3 className="text-sm font-bold text-muted-foreground uppercase tracking-wider">Product Images</h3>
-                <span className="text-xs font-semibold text-muted-foreground">
-                  {existingImages.length + imagePreviews.length} photos
-                </span>
-              </div>
-
-              <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                <label className="flex aspect-square cursor-pointer flex-col items-center justify-center gap-2 rounded-2xl border-2 border-dashed border-border bg-background/50 text-muted-foreground transition-colors hover:border-primary hover:bg-primary/5 hover:text-primary">
-                  <UploadCloudIcon className="h-6 w-6" />
-                  <span className="text-xs font-bold text-center px-2">Upload or drag photos</span>
-                  <input type="file" accept="image/*" multiple onChange={handleImageUpload} className="hidden" />
-                </label>
-
-                {existingImages.map((src, index) => (
-                  <div
-                    key={`existing-${index}`}
-                    className="group relative aspect-square overflow-hidden rounded-2xl border bg-muted shadow-sm"
-                  >
-                    {/* eslint-disable-next-line @next/next/no-img-element */}
-                    <img src={src} alt={`Existing ${index + 1}`} className="h-full w-full object-cover" />
-                    <div className="absolute inset-0 flex items-center justify-center bg-black/40 opacity-0 transition-opacity group-hover:opacity-100">
-                      <button
-                        type="button"
-                        onClick={() => removeExistingImage(index)}
-                        className="rounded-full bg-destructive p-2 text-destructive-foreground shadow-sm hover:scale-105 active:scale-95 transition-transform"
-                        title="Remove photo"
-                      >
-                        <TrashIcon className="h-4 w-4" />
-                      </button>
-                    </div>
-                  </div>
-                ))}
-
-                {imagePreviews.map((src, index) => (
-                  <div
-                    key={`new-${index}`}
-                    className="group relative aspect-square overflow-hidden rounded-2xl border bg-muted shadow-sm"
-                  >
-                    {/* eslint-disable-next-line @next/next/no-img-element */}
-                    <img src={src} alt={`Upload ${index + 1}`} className="h-full w-full object-cover" />
-                    <div className="absolute inset-0 flex items-center justify-center bg-black/40 opacity-0 transition-opacity group-hover:opacity-100">
-                      <button
-                        type="button"
-                        onClick={() => removeImage(index)}
-                        className="rounded-full bg-destructive p-2 text-destructive-foreground shadow-sm hover:scale-105 active:scale-95 transition-transform"
-                      >
-                        <TrashIcon className="h-4 w-4" />
-                      </button>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
-
-            <hr className="border-border/50" />
-
-            {/* Basic Details */}
-            <div className="flex flex-col gap-5">
-              <h3 className="text-sm font-bold text-muted-foreground uppercase tracking-wider">Basic Details</h3>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div className="flex flex-col gap-2">
-                  <label className="text-sm font-bold">Product Name</label>
-                  <input
-                    required
-                    value={name}
-                    onChange={(e) => setName(e.target.value)}
-                    placeholder="e.g. Double Cheese Burger"
-                    className="rounded-xl border bg-background px-4 py-3 text-sm outline-none focus:border-primary focus:ring-1 focus:ring-primary shadow-sm"
-                  />
-                </div>
-                <div className="flex flex-col gap-2">
-                  <label className="text-sm font-bold">Price (ZAR)</label>
-                  <input
-                    required
-                    type="number"
-                    min="0"
-                    step="any"
-                    value={price}
-                    onChange={(e) => setPrice(e.target.value)}
-                    placeholder="0.00"
-                    className="rounded-xl border bg-background px-4 py-3 text-sm outline-none focus:border-primary focus:ring-1 focus:ring-primary shadow-sm"
-                  />
-                </div>
-                <div className="flex flex-col gap-2 md:col-span-2">
-                  <div className="flex items-center justify-between">
-                    <label className="text-sm font-bold">Category</label>
-                    <span className="text-xs font-semibold text-muted-foreground">Select an option</span>
-                  </div>
-
-                  {/* Curated category pills for fast 1-tap typo-free selection */}
-                  <div className="flex flex-wrap gap-2">
-                    {PRODUCT_CATEGORY_OPTIONS.map((catOption) => {
-                      const isSelected = !isCustomCategory && category === catOption
-                      return (
-                        <button
-                          key={catOption}
-                          type="button"
-                          onClick={() => {
-                            setIsCustomCategory(false)
-                            setCategory(catOption)
-                          }}
-                          className={`rounded-full px-3 py-1.5 text-xs font-bold transition-all ${
-                            isSelected
-                              ? 'bg-primary text-primary-foreground shadow-sm scale-105'
-                              : 'bg-muted/60 text-muted-foreground hover:bg-muted hover:text-foreground'
-                          }`}
-                        >
-                          {catOption}
-                        </button>
-                      )
-                    })}
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setIsCustomCategory(true)
-                        setCategory(customCategoryInput.trim() || 'Other')
-                      }}
-                      className={`rounded-full px-3 py-1.5 text-xs font-bold transition-all ${
-                        isCustomCategory
-                          ? 'bg-primary text-primary-foreground shadow-sm scale-105'
-                          : 'bg-muted/60 text-muted-foreground hover:bg-muted hover:text-foreground'
-                      }`}
-                    >
-                      + Custom / Other
-                    </button>
-                  </div>
-
-                  {/* Dropdown alternative */}
-                  <div className="mt-1 flex items-center gap-2">
-                    <select
-                      value={isCustomCategory ? 'other' : category}
-                      onChange={(e) => {
-                        if (e.target.value === 'other') {
-                          setIsCustomCategory(true)
-                          setCategory(customCategoryInput.trim() || 'Other')
-                        } else {
-                          setIsCustomCategory(false)
-                          setCategory(e.target.value)
-                        }
-                      }}
-                      className="w-full rounded-xl border bg-background px-4 py-2.5 text-sm outline-none focus:border-primary focus:ring-1 focus:ring-primary shadow-sm"
-                    >
-                      {PRODUCT_CATEGORY_OPTIONS.map((c) => (
-                        <option key={c} value={c}>{c}</option>
-                      ))}
-                      <option value="other">Other (Custom category)</option>
-                    </select>
-                  </div>
-
-                  {/* Custom category input if selected */}
-                  {isCustomCategory && (
-                    <div className="mt-2 flex flex-col gap-1">
-                      <input
-                        required
-                        value={customCategoryInput}
-                        onChange={(e) => {
-                          setCustomCategoryInput(e.target.value)
-                          setCategory(e.target.value.trim() || 'Other')
-                        }}
-                        placeholder="Enter custom category name (e.g. Seafood, Smoothies)"
-                        className="rounded-xl border bg-background px-4 py-2.5 text-sm outline-none focus:border-primary focus:ring-1 focus:ring-primary shadow-sm"
-                        autoFocus
-                      />
-                    </div>
-                  )}
-                </div>
-                <div className="flex flex-col gap-2 md:col-span-2">
-                  <label className="text-sm font-bold">Description</label>
-                  <textarea
-                    rows={3}
-                    value={description}
-                    onChange={(e) => setDescription(e.target.value)}
-                    placeholder="Describe the meal ingredients..."
-                    className="rounded-xl border bg-background px-4 py-3 text-sm outline-none focus:border-primary focus:ring-1 focus:ring-primary shadow-sm"
-                  />
-                </div>
-              </div>
-            </div>
-
-            <hr className="border-border/50" />
-
-            {/* Modifiers & Extras */}
-            <div className="flex flex-col gap-4">
-              <div className="flex items-center justify-between">
-                <div>
-                  <h3 className="text-sm font-bold text-muted-foreground uppercase tracking-wider">Modifiers & Extras</h3>
-                  <p className="text-xs text-muted-foreground mt-0.5">
-                    Let customers customize their meal (e.g. choose protein, add cheese).
-                  </p>
-                </div>
-                <button
-                  type="button"
-                  onClick={handleAddGroup}
-                  className="flex items-center gap-1.5 rounded-full bg-primary/10 px-3 py-1.5 text-xs font-bold text-primary hover:bg-primary/20 transition-colors"
-                >
-                  <PlusIcon className="h-3.5 w-3.5" /> Add Group
-                </button>
-              </div>
-
-              {modifierGroups.length === 0 && (
-                <div className="rounded-xl border border-dashed p-8 text-center text-sm text-muted-foreground">
-                  No modifiers added. Click "Add Group" to create options like "Choose Protein".
-                </div>
-              )}
-
-              <div className="flex flex-col gap-6">
-                {modifierGroups.map((group, index) => (
-                  <div key={group.id} className="rounded-2xl border bg-background/50 p-5 shadow-sm">
-                    <div className="flex flex-wrap md:flex-nowrap items-start gap-4 mb-4">
-                      <div className="flex-1 flex flex-col gap-2 min-w-[200px]">
-                        <label className="text-xs font-bold">Group Title</label>
-                        <input
-                          required
-                          value={group.title}
-                          onChange={(e) => updateGroup(group.id, { title: e.target.value })}
-                          placeholder="e.g. Choose your protein"
-                          className="w-full rounded-lg border bg-background px-3 py-2 text-sm outline-none focus:border-primary"
-                        />
-                      </div>
-
-                      <div className="flex flex-col gap-2">
-                        <label className="text-xs font-bold">Selection Type</label>
-                        <select
-                          value={group.type}
-                          onChange={(e) =>
-                            updateGroup(group.id, { type: e.target.value as 'single' | 'multi' })
-                          }
-                          className="w-full rounded-lg border bg-background px-3 py-2 text-sm outline-none focus:border-primary"
-                        >
-                          <option value="single">Single Choice</option>
-                          <option value="multi">Multiple Choice</option>
-                        </select>
-                      </div>
-
-                      <div className="flex flex-col gap-2">
-                        <label className="text-xs font-bold">Requirement</label>
-                        <label className="flex items-center gap-2 h-9 cursor-pointer">
-                          <input
-                            type="checkbox"
-                            checked={group.required}
-                            onChange={(e) => updateGroup(group.id, { required: e.target.checked })}
-                            className="rounded accent-primary w-4 h-4"
-                          />
-                          <span className="text-sm font-medium">Required</span>
-                        </label>
-                      </div>
-
-                      <button
-                        type="button"
-                        onClick={() => removeGroup(group.id)}
-                        className="mt-7 text-muted-foreground hover:text-destructive p-1 rounded"
-                      >
-                        <TrashIcon className="h-4 w-4" />
-                      </button>
-                    </div>
-
-                    <div className="pl-4 border-l-2 border-primary/20 flex flex-col gap-3">
-                      {group.options.map((option) => (
-                        <div key={option.id} className="flex items-center gap-3">
-                          <input
-                            required
-                            value={option.label}
-                            onChange={(e) => updateOption(group.id, option.id, { label: e.target.value })}
-                            placeholder="Option Name"
-                            className="flex-1 rounded-lg border bg-background px-3 py-2 text-sm outline-none focus:border-primary"
-                          />
-                          <div className="relative w-32">
-                            <span className="absolute left-3 top-2.5 text-xs text-muted-foreground font-bold">
-                              R
-                            </span>
-                            <input
-                              required
-                              type="number"
-                              min="0"
-                              step="any"
-                              value={option.price}
-                              onChange={(e) => updateOption(group.id, option.id, { price: e.target.value })}
-                              className="w-full pl-6 rounded-lg border bg-background px-3 py-2 text-sm outline-none focus:border-primary"
-                            />
-                          </div>
-                          <button
-                            type="button"
-                            onClick={() => removeOption(group.id, option.id)}
-                            className="text-muted-foreground hover:text-destructive"
-                          >
-                            <CloseIcon className="h-4 w-4" />
-                          </button>
-                        </div>
-                      ))}
-                      <button
-                        type="button"
-                        onClick={() => handleAddOption(group.id)}
-                        className="self-start text-xs font-bold text-primary hover:underline mt-1"
-                      >
-                        + Add Option
-                      </button>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
-          </form>
-        </div>
-
-        <div className="border-t bg-card/50 p-6 flex justify-end gap-3 rounded-b-[2rem]">
+    <BottomSheet
+      open={open}
+      onClose={onClose}
+      title={initialProduct ? 'Edit Menu Item' : 'Add Menu Item'}
+      footer={
+        <div className="flex items-center gap-2.5">
           <button
             type="button"
             onClick={onClose}
             disabled={isSubmitting}
-            className="rounded-xl px-5 py-3 text-sm font-bold text-foreground hover:bg-muted transition-colors disabled:opacity-50"
+            className="rounded-full bg-secondary px-5 py-3 text-xs font-bold text-foreground disabled:opacity-50"
           >
             Cancel
           </button>
           <button
             type="submit"
-            form="add-product-form"
+            form="merchant-product-form"
             disabled={isSubmitting}
-            className="rounded-xl bg-primary px-6 py-3 text-sm font-bold text-primary-foreground shadow-sm hover:brightness-110 active:scale-95 transition-all disabled:opacity-50"
+            className="flex-1 rounded-full bg-primary py-3 text-xs font-bold text-primary-foreground shadow-sm disabled:opacity-50"
           >
-            {isSubmitting ? 'Saving...' : (initialProduct ? 'Save Changes' : 'Create Product')}
+            {isSubmitting
+              ? 'Saving...'
+              : initialProduct
+                ? 'Save Changes'
+                : 'Create Item'}
           </button>
         </div>
-      </div>
-    </div>
+      }
+    >
+      <form
+        id="merchant-product-form"
+        onSubmit={handleSubmit}
+        className="flex flex-col gap-4 py-2"
+      >
+        {/* Product Photos */}
+        <div>
+          <label className="mb-1.5 block text-xs font-bold text-foreground">
+            Photos
+          </label>
+          <div className="grid grid-cols-3 gap-2.5">
+            <label className="flex aspect-square cursor-pointer flex-col items-center justify-center gap-1 rounded-2xl border-2 border-dashed border-border bg-background text-muted-foreground hover:border-primary hover:text-primary">
+              <UploadCloudIcon className="h-5 w-5" />
+              <span className="text-[11px] font-bold">Upload</span>
+              <input
+                type="file"
+                accept="image/*"
+                multiple
+                onChange={handleImageUpload}
+                className="hidden"
+              />
+            </label>
+
+            {existingImages.map((src, index) => (
+              <div
+                key={`existing-${index}`}
+                className="relative aspect-square overflow-hidden rounded-2xl bg-secondary ring-1 ring-border"
+              >
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img
+                  src={src}
+                  alt={`Item ${index + 1}`}
+                  className="h-full w-full object-cover"
+                />
+                <button
+                  type="button"
+                  onClick={() => removeExistingImage(index)}
+                  className="absolute right-1.5 top-1.5 flex h-6 w-6 items-center justify-center rounded-full bg-card/90 text-destructive shadow-sm"
+                  aria-label="Remove photo"
+                >
+                  <TrashIcon className="h-3.5 w-3.5" />
+                </button>
+              </div>
+            ))}
+
+            {imagePreviews.map((src, index) => (
+              <div
+                key={`new-${index}`}
+                className="relative aspect-square overflow-hidden rounded-2xl bg-secondary ring-1 ring-border"
+              >
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img
+                  src={src}
+                  alt={`Upload ${index + 1}`}
+                  className="h-full w-full object-cover"
+                />
+                <button
+                  type="button"
+                  onClick={() => removeImage(index)}
+                  className="absolute right-1.5 top-1.5 flex h-6 w-6 items-center justify-center rounded-full bg-card/90 text-destructive shadow-sm"
+                  aria-label="Remove photo"
+                >
+                  <TrashIcon className="h-3.5 w-3.5" />
+                </button>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        {/* Name & Price */}
+        <div className="grid grid-cols-3 gap-2.5">
+          <div className="col-span-2 flex flex-col gap-1">
+            <label className="text-xs font-bold text-foreground">
+              Item Name
+            </label>
+            <input
+              required
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              placeholder="e.g. Chicken Burger"
+              className="rounded-2xl border bg-background px-3.5 py-2.5 text-sm outline-none focus:border-primary"
+            />
+          </div>
+          <div className="flex flex-col gap-1">
+            <label className="text-xs font-bold text-foreground">
+              Price (R)
+            </label>
+            <input
+              required
+              type="number"
+              min="0.01"
+              step="any"
+              value={price}
+              onChange={(e) => setPrice(e.target.value)}
+              placeholder="59.95"
+              className="rounded-2xl border bg-background px-3 py-2.5 text-sm outline-none focus:border-primary"
+            />
+          </div>
+        </div>
+
+        {/* Category Pills */}
+        <div className="flex flex-col gap-1.5">
+          <label className="text-xs font-bold text-foreground">Category</label>
+          <div className="no-scrollbar flex gap-1.5 overflow-x-auto pb-1">
+            {PRODUCT_CATEGORY_OPTIONS.map((catOption) => {
+              const isSelected = !isCustomCategory && category === catOption
+              return (
+                <button
+                  key={catOption}
+                  type="button"
+                  onClick={() => {
+                    setIsCustomCategory(false)
+                    setCategory(catOption)
+                  }}
+                  className={cn(
+                    'shrink-0 rounded-full px-3.5 py-1.5 text-xs font-bold transition-colors',
+                    isSelected
+                      ? 'bg-primary text-primary-foreground'
+                      : 'bg-secondary text-foreground',
+                  )}
+                >
+                  {catOption}
+                </button>
+              )
+            })}
+            <button
+              type="button"
+              onClick={() => {
+                setIsCustomCategory(true)
+                setCategory(customCategoryInput.trim() || 'Other')
+              }}
+              className={cn(
+                'shrink-0 rounded-full px-3.5 py-1.5 text-xs font-bold transition-colors',
+                isCustomCategory
+                  ? 'bg-primary text-primary-foreground'
+                  : 'bg-secondary text-foreground',
+              )}
+            >
+              + Custom
+            </button>
+          </div>
+          {isCustomCategory && (
+            <input
+              required
+              value={customCategoryInput}
+              onChange={(e) => {
+                setCustomCategoryInput(e.target.value)
+                setCategory(e.target.value.trim() || 'Other')
+              }}
+              placeholder="Custom category name"
+              className="rounded-2xl border bg-background px-3.5 py-2.5 text-sm outline-none focus:border-primary"
+            />
+          )}
+        </div>
+
+        {/* Description */}
+        <div className="flex flex-col gap-1">
+          <label className="text-xs font-bold text-foreground">
+            Description
+          </label>
+          <textarea
+            rows={2}
+            value={description}
+            onChange={(e) => setDescription(e.target.value)}
+            placeholder="Describe ingredients or sides included..."
+            className="rounded-2xl border bg-background px-3.5 py-2.5 text-sm outline-none focus:border-primary"
+          />
+        </div>
+
+        {/* Modifiers */}
+        <div className="flex flex-col gap-2.5 border-t border-border pt-3">
+          <div className="flex items-center justify-between">
+            <span className="text-xs font-bold text-foreground">
+              Modifiers & Extras
+            </span>
+            <button
+              type="button"
+              onClick={handleAddGroup}
+              className="inline-flex items-center gap-1 rounded-full bg-primary/10 px-3 py-1 text-xs font-bold text-primary"
+            >
+              <PlusIcon className="h-3.5 w-3.5" />
+              <span>Add Group</span>
+            </button>
+          </div>
+
+          {modifierGroups.map((group) => (
+            <div
+              key={group.id}
+              className="flex flex-col gap-2.5 rounded-2xl bg-secondary/50 p-3 ring-1 ring-border"
+            >
+              <div className="flex items-center gap-2">
+                <input
+                  required
+                  value={group.title}
+                  onChange={(e) =>
+                    updateGroup(group.id, { title: e.target.value })
+                  }
+                  placeholder="Group title (e.g. Drink choice)"
+                  className="min-w-0 flex-1 rounded-xl border bg-card px-3 py-1.5 text-xs font-semibold outline-none focus:border-primary"
+                />
+                <button
+                  type="button"
+                  onClick={() => removeGroup(group.id)}
+                  className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-muted-foreground hover:text-destructive"
+                  aria-label="Remove group"
+                >
+                  <TrashIcon className="h-3.5 w-3.5" />
+                </button>
+              </div>
+
+              <div className="flex items-center justify-between gap-2 text-xs">
+                <select
+                  value={group.type}
+                  onChange={(e) =>
+                    updateGroup(group.id, {
+                      type: e.target.value as 'single' | 'multi',
+                    })
+                  }
+                  className="rounded-xl border bg-card px-2.5 py-1 text-xs outline-none"
+                >
+                  <option value="single">Single choice</option>
+                  <option value="multi">Multiple choice</option>
+                </select>
+
+                <label className="flex cursor-pointer items-center gap-1.5 font-semibold">
+                  <input
+                    type="checkbox"
+                    checked={group.required}
+                    onChange={(e) =>
+                      updateGroup(group.id, { required: e.target.checked })
+                    }
+                    className="h-3.5 w-3.5 rounded accent-primary"
+                  />
+                  <span>Required</span>
+                </label>
+              </div>
+
+              <div className="flex flex-col gap-1.5 border-l-2 border-primary/25 pl-2.5">
+                {group.options.map((option) => (
+                  <div key={option.id} className="flex items-center gap-1.5">
+                    <input
+                      required
+                      value={option.label}
+                      onChange={(e) =>
+                        updateOption(group.id, option.id, {
+                          label: e.target.value,
+                        })
+                      }
+                      placeholder="Option name"
+                      className="min-w-0 flex-1 rounded-xl border bg-card px-2.5 py-1.5 text-xs outline-none"
+                    />
+                    <div className="relative w-20 shrink-0">
+                      <span className="absolute left-2 top-1.5 text-[11px] font-bold text-muted-foreground">
+                        R
+                      </span>
+                      <input
+                        required
+                        type="number"
+                        min="0"
+                        step="any"
+                        value={option.price}
+                        onChange={(e) =>
+                          updateOption(group.id, option.id, {
+                            price: e.target.value,
+                          })
+                        }
+                        className="w-full rounded-xl border bg-card py-1.5 pl-5 pr-1.5 text-xs outline-none"
+                      />
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => removeOption(group.id, option.id)}
+                      className="flex h-6 w-6 shrink-0 items-center justify-center text-muted-foreground hover:text-destructive"
+                      aria-label="Remove option"
+                    >
+                      <CloseIcon className="h-3.5 w-3.5" />
+                    </button>
+                  </div>
+                ))}
+                <button
+                  type="button"
+                  onClick={() => handleAddOption(group.id)}
+                  className="self-start text-xs font-bold text-primary"
+                >
+                  + Add Option
+                </button>
+              </div>
+            </div>
+          ))}
+        </div>
+      </form>
+    </BottomSheet>
   )
 }

@@ -1,10 +1,29 @@
 import { NextResponse } from 'next/server'
 
+const MAX_IMAGE_BYTES = 5 * 1024 * 1024 // 5 MB per image
+const MAX_FILES_PER_UPLOAD = 6
+const ALLOWED_MIME_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp', 'image/gif'])
+const ALLOWED_EXTENSIONS = new Set(['jpg', 'jpeg', 'png', 'webp', 'gif'])
+
 function uidFromIdToken(token: string): string | null {
   try {
-    const payload = JSON.parse(Buffer.from(token.split('.')[1], 'base64url').toString('utf8')) as {
+    const parts = token.split('.')
+    if (parts.length !== 3) return null
+    const payload = JSON.parse(Buffer.from(parts[1], 'base64url').toString('utf8')) as {
       user_id?: string
       sub?: string
+      exp?: number
+      aud?: string
+      iss?: string
+    }
+    const nowSeconds = Math.floor(Date.now() / 1000)
+    if (typeof payload.exp === 'number' && payload.exp < nowSeconds) {
+      return null
+    }
+    const projectId = process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID
+    if (projectId) {
+      if (payload.aud && payload.aud !== projectId) return null
+      if (payload.iss && payload.iss !== `https://securetoken.google.com/${projectId}`) return null
     }
     return payload.user_id || payload.sub || null
   } catch {
@@ -70,13 +89,25 @@ export async function POST(request: Request) {
 
   const uid = uidFromIdToken(idToken)
   if (!uid) {
-    return NextResponse.json({ error: 'Invalid session token.' }, { status: 401 })
+    return NextResponse.json({ error: 'Invalid or expired session token.' }, { status: 401 })
   }
 
   const formData = await request.formData()
   const files = formData.getAll('files').filter((value): value is File => value instanceof File)
   if (files.length === 0) {
     return NextResponse.json({ error: 'No image files were sent.' }, { status: 400 })
+  }
+  if (files.length > MAX_FILES_PER_UPLOAD) {
+    return NextResponse.json({ error: `Maximum ${MAX_FILES_PER_UPLOAD} images allowed per upload.` }, { status: 400 })
+  }
+
+  for (const file of files) {
+    if (file.size <= 0 || file.size > MAX_IMAGE_BYTES) {
+      return NextResponse.json({ error: 'Each image must be under 5 MB.' }, { status: 400 })
+    }
+    if (file.type && !ALLOWED_MIME_TYPES.has(file.type.toLowerCase())) {
+      return NextResponse.json({ error: 'Only JPEG, PNG, WebP, and GIF images are allowed.' }, { status: 400 })
+    }
   }
 
   const buckets = candidateBuckets()
@@ -87,11 +118,12 @@ export async function POST(request: Request) {
   const urls: string[] = []
 
   for (const file of files) {
-    const baseName = file.name.replace(/\.[^.]+$/, '').replace(/[^a-zA-Z0-9]/g, '-')
-    const extension = file.name.split('.').pop() || 'jpg'
+    const baseName = file.name.replace(/\.[^.]+$/, '').replace(/[^a-zA-Z0-9]/g, '-').slice(0, 50)
+    const rawExt = (file.name.split('.').pop() || 'jpg').toLowerCase()
+    const extension = ALLOWED_EXTENSIONS.has(rawExt) ? rawExt : 'jpg'
     const path = `products/${uid}/${Date.now()}-${baseName}.${extension}`
     const body = await file.arrayBuffer()
-    const contentType = file.type || 'image/jpeg'
+    const contentType = ALLOWED_MIME_TYPES.has(file.type.toLowerCase()) ? file.type.toLowerCase() : 'image/jpeg'
 
     let uploaded = false
     let lastError = ''

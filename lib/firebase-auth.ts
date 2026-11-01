@@ -72,7 +72,6 @@ export type UserProfileInput = {
   [key: string]: unknown
 }
 
-// ✅ FIXED: explicit payload, no spreading of raw data, with debug logs
 export async function saveUserProfile(uid: string, data: UserProfileInput) {
   // 1. Normalize and validate role
   const role = normalizeUserRole(data.role)
@@ -80,27 +79,41 @@ export async function saveUserProfile(uid: string, data: UserProfileInput) {
     throw new Error('Choose Student or Store Owner before creating your account.')
   }
 
-  // 2. Build a clean payload – explicitly set role, do NOT spread data blindly
-  const payload = {
-    name: data.name,
-    email: data.email,
-    role: role,          // <-- forcefully set
-    // add any other fields you need here, e.g., createdAt: new Date().toISOString()
+  // 2. Build a clean payload – explicitly set role and validated profile fields
+  const payload: Record<string, unknown> = {
+    name: String(data.name || '').trim(),
+    email: String(data.email || '').trim(),
+    role: role,
   }
 
-  // 3. Debug: log what we're about to write
-  console.log('🔥 saveUserProfile payload:', payload)
+  if (typeof data.phone === 'string' && data.phone.trim()) {
+    payload.phone = data.phone.trim()
+  }
+  if (typeof data.campusId === 'string' && data.campusId.trim()) {
+    payload.campusId = data.campusId.trim()
+  }
+  if (typeof data.storeName === 'string' && data.storeName.trim()) {
+    payload.storeName = data.storeName.trim()
+  }
+  if (typeof data.firstName === 'string' && data.firstName.trim()) {
+    payload.firstName = data.firstName.trim()
+  }
+  if (typeof data.lastName === 'string' && data.lastName.trim()) {
+    payload.lastName = data.lastName.trim()
+  }
+  if (typeof data.studentId === 'string' && data.studentId.trim()) {
+    payload.studentId = data.studentId.trim()
+  }
 
   try {
     await setDoc(doc(db, 'users', uid), payload, { merge: true })
-    console.log('✅ Profile saved successfully with role:', role)
   } catch (error) {
-    console.error('❌ Firestore write error:', error)
+    console.error('Firestore write error:', error)
     throw new Error(
       'Account was created, but we could not save your role. Check Firestore rules for the users collection, then try again.',
     )
   }
 
-  // 4. Cache role locally
+  // 3. Cache role locally
   cacheRole(uid, role)
 }

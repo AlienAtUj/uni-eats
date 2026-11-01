@@ -169,10 +169,9 @@ export function SlidersIcon(props: IconProps) {
 export function PackageIcon(props: IconProps) {
   return (
     <svg {...base} {...props}>
-      <path d="M5 8.5L12 3l7 5.5" />
-      <path d="M12 12v9" />
-      <path d="M5 8.5v7l7 4.5" />
-      <path d="M19 8.5v7l-7 4.5" />
+      <path d="M12 3 4.5 7.2v9.6L12 21l7.5-4.2V7.2L12 3Z" />
+      <path d="m4.5 7.2 7.5 4.3 7.5-4.3" />
+      <path d="M12 11.5V21" />
     </svg>
   )
 }
@@ -180,8 +179,8 @@ export function PackageIcon(props: IconProps) {
 export function TrendingUpIcon(props: IconProps) {
   return (
     <svg {...base} {...props}>
-      <path d="M3 17l4-4 4 4 4-4 4 4" />
-      <path d="M3 9l4-4 4 4 4-4 4 4" />
+      <path d="m3 17 6-6 4 4 8-8" />
+      <path d="M15 7h6v6" />
     </svg>
   )
 }
@@ -201,7 +200,6 @@ export function BellIcon(props: IconProps) {
     <svg {...base} {...props}>
       <path d="M6 8.5a6 6 0 0 1 12 0v3.5l2 3H4l2-3Z" />
       <path d="M9 17.5c0 1.2 1.3 2 3 2s3-.8 3-2" />
-      <circle cx="18" cy="5" r="1.5" fill="currentColor" fillOpacity="0.4" />
     </svg>
   )
 }
@@ -219,9 +217,48 @@ export function TrashIcon(props: IconProps) {
 export function UploadCloudIcon(props: IconProps) {
   return (
     <svg {...base} {...props}>
-      <path d="M7 17.5a4.5 4.5 0 0 0 0-9 4.5 4.5 0 0 1 6-6 4.5 4.5 0 0 1 6 6 4.5 4.5 0 0 1 0 9" />
-      <path d="M12 11.5v5" />
-      <path d="M10 13.5l2-2 2 2" />
+      <path d="M7 17.5a4.5 4.5 0 0 1-.5-8.97A5.5 5.5 0 0 1 17.3 7a4.5 4.5 0 0 1-.3 10.5H7Z" />
+      <path d="M12 11v6" />
+      <path d="m9.5 13.5 2.5-2.5 2.5 2.5" />
+    </svg>
+  )
+}
+
+export function LockIcon(props: IconProps) {
+  return (
+    <svg {...base} {...props}>
+      <rect x="5" y="11" width="14" height="10" rx="2" />
+      <path d="M8 11V7a4 4 0 0 1 8 0v4" />
+    </svg>
+  )
+}
+
+export function StoreIcon(props: IconProps) {
+  return (
+    <svg {...base} {...props}>
+      <path d="M4 7.5 5.5 4h13L20 7.5" />
+      <path d="M4 7.5a2.5 2.5 0 0 0 5 0 2.5 2.5 0 0 0 5 0 2.5 2.5 0 0 0 5 0" />
+      <path d="M5.5 10v10h13V10" />
+      <path d="M10 20v-5h4v5" />
+    </svg>
+  )
+}
+
+export function LogOutIcon(props: IconProps) {
+  return (
+    <svg {...base} {...props}>
+      <path d="M9 20H5.5A1.5 1.5 0 0 1 4 18.5v-13A1.5 1.5 0 0 1 5.5 4H9" />
+      <path d="M16 16.5 20.5 12 16 7.5" />
+      <path d="M20.5 12H9" />
+    </svg>
+  )
+}
+
+export function EditIcon(props: IconProps) {
+  return (
+    <svg {...base} {...props}>
+      <path d="M15.5 4.5 19.5 8.5 8 20H4v-4L15.5 4.5Z" />
+      <path d="m13.5 6.5 4 4" />
     </svg>
   )
 }

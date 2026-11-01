@@ -13,7 +13,12 @@ import { onAuthStateChanged, signOut as firebaseSignOut, type User } from 'fireb
 import { auth } from '@/lib/firebase'
 import { fetchUserRole, type UserRole } from '@/lib/firebase-auth'
 
-import { useFirebaseRestaurants, createOrder, getCustomerOrders } from '@/lib/firebase-db'
+import {
+  useFirebaseRestaurants,
+  createOrder,
+  getCustomerOrders,
+  type Order,
+} from '@/lib/firebase-db'
 
 const SERVICE_FEE = 0.99
 
@@ -54,6 +59,7 @@ type Store = {
     paymentReference?: string
     paymentStatus?: 'paid' | 'pending' | 'cash_on_pickup'
     paymentChannel?: string
+    verifiedTotalZar?: number
   }) => Promise<void>
   // Auth state
   user: User | null
@@ -92,7 +98,31 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     try {
       const savedCart = localStorage.getItem('unieats_cart')
       if (savedCart) {
-        setCart(JSON.parse(savedCart))
+        const parsed = JSON.parse(savedCart)
+        if (Array.isArray(parsed)) {
+          const validLines = parsed
+            .filter(
+              (l: any) =>
+                l &&
+                typeof l.itemId === 'string' &&
+                typeof l.restaurantId === 'string' &&
+                Number.isFinite(Number(l.unitPrice)) &&
+                Number(l.unitPrice) > 0 &&
+                Number.isInteger(Number(l.quantity)) &&
+                Number(l.quantity) > 0
+            )
+            .map((l: any) => ({
+              ...l,
+              unitPrice: Number(l.unitPrice),
+              quantity: Math.min(99, Number(l.quantity)),
+              modifierLabels: Array.isArray(l.modifierLabels) ? l.modifierLabels : [],
+            }))
+          // Ensure cart only contains items from a single restaurant
+          if (validLines.length > 0) {
+            const primaryRestId = validLines[0].restaurantId
+            setCart(validLines.filter((l: CartLine) => l.restaurantId === primaryRestId))
+          }
+        }
       }
       const savedOrder = localStorage.getItem('unieats_active_order')
       if (savedOrder) {
@@ -133,11 +163,14 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     setScreen(newScreen)
     try {
       sessionStorage.setItem('unieats_screen', newScreen)
-    } catch {}
+    } catch (_e) {
+      // Ignore storage errors
+    }
   }
 
   const { restaurants: liveRestaurants } = useFirebaseRestaurants()
-  const currentRestaurants = liveRestaurants && liveRestaurants.length > 0 ? liveRestaurants : restaurants
+  const currentRestaurants: Restaurant[] =
+    liveRestaurants && liveRestaurants.length > 0 ? liveRestaurants : restaurants
 
   // Auth state
   const [user, setUser] = useState<User | null>(null)
@@ -162,9 +195,13 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         try {
           const liveOrders = await getCustomerOrders(currentUser.uid)
           if (liveOrders && liveOrders.length > 0) {
-            const activeOrder = liveOrders.find(
-              (o) => o.status === 'pending' || o.status === 'preparing' || o.status === 'ready'
-            ) || liveOrders[0]
+            const activeOrder =
+              liveOrders.find(
+                (o: Order) =>
+                  o.status === 'pending' ||
+                  o.status === 'preparing' ||
+                  o.status === 'ready',
+              ) || liveOrders[0]
 
             if (activeOrder) {
               setPlacedOrder({
@@ -186,6 +223,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
                 pickupTime: activeOrder.pickupTime || '10-15 min',
                 campusName: 'Campus Center',
                 status: activeOrder.status,
+                paymentReference: activeOrder.paymentReference,
+                paymentStatus: activeOrder.paymentStatus,
               })
             }
           }
@@ -206,16 +245,16 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   }
 
   const activeRestaurant = useMemo(
-    () => currentRestaurants.find((r) => r.id === activeId) ?? null,
+    () => currentRestaurants.find((r: Restaurant) => r.id === activeId) ?? null,
     [activeId, currentRestaurants],
   )
 
   const subtotal = useMemo(
-    () => cart.reduce((sum, l) => sum + l.unitPrice * l.quantity, 0),
+    () => cart.reduce((sum, l) => sum + (Number(l.unitPrice) || 0) * (Number(l.quantity) || 0), 0),
     [cart],
   )
   const itemCount = useMemo(
-    () => cart.reduce((sum, l) => sum + l.quantity, 0),
+    () => cart.reduce((sum, l) => sum + (Number(l.quantity) || 0), 0),
     [cart],
   )
 
@@ -233,6 +272,27 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     cart,
     addLine: (line) =>
       setCart((prev) => {
+        const safeUnitPrice = Math.max(0, Number(line.unitPrice) || 0)
+        const safeQty = Math.max(1, Math.min(99, Math.round(Number(line.quantity) || 1)))
+
+        if (prev.length > 0 && prev[0].restaurantId !== line.restaurantId) {
+          const replace =
+            typeof window !== 'undefined'
+              ? window.confirm(
+                  `Your cart contains items from ${prev[0].restaurantName}. Clear cart and start a new order from ${line.restaurantName}?`
+                )
+              : true
+          if (!replace) return prev
+          return [
+            {
+              ...line,
+              unitPrice: safeUnitPrice,
+              quantity: safeQty,
+              lineId: crypto.randomUUID(),
+            },
+          ]
+        }
+
         const key = line.itemId + '|' + line.modifierLabels.join(',')
         const existing = prev.find(
           (l) => l.itemId + '|' + l.modifierLabels.join(',') === key,
@@ -240,18 +300,26 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         if (existing) {
           return prev.map((l) =>
             l.lineId === existing.lineId
-              ? { ...l, quantity: l.quantity + line.quantity }
+              ? { ...l, quantity: Math.min(99, l.quantity + safeQty) }
               : l,
           )
         }
-        return [...prev, { ...line, lineId: crypto.randomUUID() }]
+        return [
+          ...prev,
+          {
+            ...line,
+            unitPrice: safeUnitPrice,
+            quantity: safeQty,
+            lineId: crypto.randomUUID(),
+          },
+        ]
       }),
     updateQty: (lineId, delta) =>
       setCart((prev) =>
         prev
           .map((l) =>
             l.lineId === lineId
-              ? { ...l, quantity: Math.max(0, l.quantity + delta) }
+              ? { ...l, quantity: Math.min(99, Math.max(0, l.quantity + delta)) }
               : l,
           )
           .filter((l) => l.quantity > 0),
@@ -260,7 +328,9 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       setCart([])
       try {
         localStorage.removeItem('unieats_cart')
-      } catch {}
+      } catch (_e) {
+        // Ignore storage errors
+      }
     },
     subtotal,
     itemCount,
@@ -274,7 +344,10 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       const campusName =
         campuses.find((c) => c.id === campusId)?.name ?? campuses[0].name
       const orderDisplayId = 'UE-' + Math.floor(1000 + Math.random() * 9000)
-      const total = subtotal + SERVICE_FEE
+      const total =
+        typeof paymentMeta?.verifiedTotalZar === 'number' && paymentMeta.verifiedTotalZar > 0
+          ? paymentMeta.verifiedTotalZar
+          : subtotal + SERVICE_FEE
       const merchantId = cart[0].restaurantId
       const merchantName = cart[0].restaurantName
 
@@ -322,7 +395,9 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       setCart([])
       try {
         localStorage.removeItem('unieats_cart')
-      } catch {}
+      } catch (_e) {
+        // Ignore storage errors
+      }
       handleSetScreen('tracking')
     },
     user,

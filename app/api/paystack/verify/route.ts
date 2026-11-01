@@ -1,30 +1,51 @@
 import { NextRequest, NextResponse } from 'next/server'
+import {
+  computeVerifiedOrderTotalCents,
+  createIntegrityHash,
+  isReferenceAlreadyUsed,
+  isValidPaymentReference,
+  verifyTimingSafeHash,
+  type CheckoutItemInput,
+} from '@/lib/paystack-server'
 
 /**
  * POST /api/paystack/verify
  * Server-to-server verification of a Paystack payment reference.
- * Prevents fake client-side "payment success" spoofing and validates exact amount & currency.
+ * Prevents fake client-side "payment success" spoofing, replay attacks, and cart price tampering.
  */
 export async function POST(req: NextRequest) {
   try {
     const secretKey = process.env.PAYSTACK_SECRET_KEY
     if (!secretKey) {
       return NextResponse.json(
-        { error: 'Paystack Secret Key (PAYSTACK_SECRET_KEY) is not configured on the server.' },
+        { verified: false, error: 'Paystack Secret Key (PAYSTACK_SECRET_KEY) is not configured on the server.' },
         { status: 500 }
       )
     }
 
-    const { reference, expectedAmountZar } = await req.json()
+    const body = await req.json()
+    const { reference, expectedAmountZar, items } = body as {
+      reference?: unknown
+      expectedAmountZar?: number
+      items?: CheckoutItemInput[]
+    }
 
-    if (!reference || typeof reference !== 'string') {
+    if (!isValidPaymentReference(reference)) {
       return NextResponse.json(
-        { error: 'Missing payment reference' },
+        { verified: false, error: 'Invalid or missing payment reference format.' },
         { status: 400 }
       )
     }
 
-    // Call Paystack Verify API directly from server
+    // 1. Prevent replay attacks (reusing a previously verified payment reference)
+    if (await isReferenceAlreadyUsed(reference)) {
+      return NextResponse.json(
+        { verified: false, error: 'This payment reference has already been used for an order.' },
+        { status: 409 }
+      )
+    }
+
+    // 2. Call Paystack Verify API directly from server
     const verifyRes = await fetch(
       `https://api.paystack.co/transaction/verify/${encodeURIComponent(reference)}`,
       {
@@ -48,7 +69,7 @@ export async function POST(req: NextRequest) {
 
     const tx = data.data
 
-    // 1. Check payment status is strictly 'success'
+    // 3. Check payment status is strictly 'success'
     if (tx.status !== 'success') {
       return NextResponse.json(
         { verified: false, error: `Payment status is '${tx.status}', not 'success'` },
@@ -56,15 +77,43 @@ export async function POST(req: NextRequest) {
       )
     }
 
-    // 2. Check amount matches expected amount (in cents) to prevent tampering
-    if (typeof expectedAmountZar === 'number' && expectedAmountZar > 0) {
-      const expectedCents = Math.round(expectedAmountZar * 100)
-      if (tx.amount < expectedCents) {
+    // 4. Check currency is strictly ZAR
+    if (tx.currency && String(tx.currency).toUpperCase() !== 'ZAR') {
+      return NextResponse.json(
+        { verified: false, error: `Unexpected payment currency: ${tx.currency}` },
+        { status: 400 }
+      )
+    }
+
+    // 5. Recompute authoritative expected amount from Firestore product prices
+    const { amountInCents: authoritativeCents } = await computeVerifiedOrderTotalCents(
+      items,
+      expectedAmountZar
+    )
+    const metadataCents = Number(tx.metadata?.verifiedAmountCents || 0)
+    const requiredCents = Math.max(authoritativeCents, metadataCents)
+
+    if (typeof tx.amount !== 'number' || tx.amount < requiredCents) {
+      return NextResponse.json(
+        {
+          verified: false,
+          error: `Amount mismatch: paid ${tx.amount} cents, expected ${requiredCents} cents`,
+        },
+        { status: 400 }
+      )
+    }
+
+    // 6. Verify cryptographic integrity hash if transaction was initialized server-side
+    if (tx.metadata?.integrityHash && metadataCents > 0) {
+      const expectedIntegrity = createIntegrityHash(
+        secretKey,
+        tx.reference,
+        metadataCents,
+        'ZAR'
+      )
+      if (!verifyTimingSafeHash(expectedIntegrity, String(tx.metadata.integrityHash))) {
         return NextResponse.json(
-          {
-            verified: false,
-            error: `Amount mismatch: paid ${tx.amount} cents, expected ${expectedCents} cents`,
-          },
+          { verified: false, error: 'Payment metadata integrity verification failed.' },
           { status: 400 }
         )
       }
@@ -86,3 +135,4 @@ export async function POST(req: NextRequest) {
     )
   }
 }
+

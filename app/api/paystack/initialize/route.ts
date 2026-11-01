@@ -1,9 +1,16 @@
 import { NextRequest, NextResponse } from 'next/server'
+import crypto from 'crypto'
+import {
+  computeVerifiedOrderTotalCents,
+  createIntegrityHash,
+  isValidEmail,
+  type CheckoutItemInput,
+} from '@/lib/paystack-server'
 
 /**
  * POST /api/paystack/initialize
  * Securely initializes a Paystack transaction on the server using PAYSTACK_SECRET_KEY.
- * Never exposes the secret key to the client browser.
+ * Recalculates order total against Firestore product prices so client cart prices cannot be tampered with.
  */
 export async function POST(req: NextRequest) {
   try {
@@ -19,18 +26,34 @@ export async function POST(req: NextRequest) {
     }
 
     const body = await req.json()
-    const { email, amountZar, metadata } = body
+    const { email, amountZar, items, metadata } = body as {
+      email?: string
+      amountZar?: number
+      items?: CheckoutItemInput[]
+      metadata?: Record<string, any>
+    }
 
-    if (!email || typeof amountZar !== 'number' || amountZar <= 0) {
+    if (!isValidEmail(email)) {
       return NextResponse.json(
-        { error: 'Valid customer email and positive order amount are required.' },
+        { error: 'A valid customer email address is required.' },
         { status: 400 }
       )
     }
 
-    // Paystack requires amount in lowest currency denomination (cents for ZAR)
-    const amountInCents = Math.round(amountZar * 100)
-    const reference = `UE_${Date.now()}_${Math.floor(1000 + Math.random() * 9000)}`
+    const { amountInCents, amountZar: verifiedAmountZar } = await computeVerifiedOrderTotalCents(
+      items,
+      amountZar
+    )
+
+    if (amountInCents <= 0) {
+      return NextResponse.json(
+        { error: 'Order total must be greater than zero.' },
+        { status: 400 }
+      )
+    }
+
+    const reference = `UE_${Date.now()}_${crypto.randomBytes(4).toString('hex')}`
+    const integrityHash = createIntegrityHash(secretKey, reference, amountInCents, 'ZAR')
 
     const paystackRes = await fetch('https://api.paystack.co/transaction/initialize', {
       method: 'POST',
@@ -39,12 +62,14 @@ export async function POST(req: NextRequest) {
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
-        email,
+        email: email.trim(),
         amount: amountInCents,
         currency: 'ZAR',
         reference,
         metadata: {
           ...metadata,
+          verifiedAmountCents: amountInCents,
+          integrityHash,
           custom_fields: [
             {
               display_name: 'Platform',
@@ -54,6 +79,7 @@ export async function POST(req: NextRequest) {
           ],
         },
       }),
+      cache: 'no-store',
     })
 
     const data = await paystackRes.json()
@@ -70,12 +96,14 @@ export async function POST(req: NextRequest) {
       accessCode: data.data.access_code,
       reference: data.data.reference,
       amountInCents,
+      amountZar: verifiedAmountZar,
     })
   } catch (error: any) {
     console.error('Paystack initialization error:', error)
     return NextResponse.json(
-      { error: 'Internal server error initializing payment' },
+      { error: error?.message || 'Internal server error initializing payment' },
       { status: 500 }
     )
   }
 }
+

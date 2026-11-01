@@ -52,20 +52,22 @@ function ItemSheetBody({
   const [multi, setMulti] = useState<Record<string, Set<string>>>({})
 
   const { unitPrice, labels } = useMemo(() => {
-    let price = item.price
+    let price = Number(item.price) || 0
     const chosen: string[] = []
     item.modifiers?.forEach((g) => {
       if (g.type === 'single') {
         const sel = g.options.find((o) => o.id === single[g.id])
         if (sel) {
-          price += sel.price
-          if (sel.price > 0 || g.required) chosen.push(sel.label)
+          const optPrice = Math.max(0, Number(sel.price) || 0)
+          price += optPrice
+          if (optPrice > 0 || g.required) chosen.push(sel.label)
         }
       } else {
         const set = multi[g.id]
         g.options.forEach((o) => {
           if (set?.has(o.id)) {
-            price += o.price
+            const optPrice = Math.max(0, Number(o.price) || 0)
+            price += optPrice
             chosen.push(o.label)
           }
         })
@@ -80,9 +82,21 @@ function ItemSheetBody({
         <Image src={item.image} alt={item.name} fill className="object-cover" />
       </div>
 
-      <p className="text-sm leading-relaxed text-muted-foreground">
-        {item.description}
-      </p>
+      <div className="flex items-center justify-between gap-2">
+        <p className="text-xs font-semibold text-muted-foreground">
+          {restaurant.name}
+          {item.section ? ` · ${item.section}` : ''}
+        </p>
+        <p className="text-base font-extrabold text-primary">
+          {formatPrice(item.price)}
+        </p>
+      </div>
+
+      {item.description && (
+        <p className="text-sm leading-relaxed text-muted-foreground">
+          {item.description}
+        </p>
+      )}
 
       {item.modifiers?.map((group) => (
         <div key={group.id}>

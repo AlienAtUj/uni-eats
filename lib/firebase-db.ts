@@ -80,9 +80,10 @@ export interface Order {
 const fetcher = async (path: string): Promise<ProductDoc[]> => {
   try {
     const collectionRef = collection(db, path)
-    const q = query(collectionRef, orderBy('createdAt', 'desc'), limit(100))
-    const snapshot = await getDocs(q)
-    return snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as ProductDoc))
+    const snapshot = await getDocs(collectionRef)
+    const docs = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as ProductDoc))
+    docs.sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0))
+    return docs.slice(0, 100)
   } catch (err: any) {
     if (err?.code !== 'permission-denied') {
       console.warn('Firestore products fetch warning:', err?.message || err)
@@ -115,108 +116,146 @@ const restaurantsFetcher = async (): Promise<Restaurant[]> => {
   const existingRestaurants: Restaurant[] = []
   const restaurantIds = new Set<string>()
 
-  // 1. Read existing documents in `restaurants` collection if available
-  try {
-    const collectionRef = collection(db, 'restaurants')
-    const snapshot = await getDocs(collectionRef)
-    for (const docSnap of snapshot.docs) {
+  // Fetch restaurants and products in parallel to cut initial load time in half
+  const [restaurantsSnapResult, productsSnapResult] = await Promise.allSettled([
+    getDocs(collection(db, 'restaurants')),
+    getDocs(collection(db, 'products')),
+  ])
+
+  // 1. Process existing documents in `restaurants` collection
+  if (restaurantsSnapResult.status === 'fulfilled') {
+    for (const docSnap of restaurantsSnapResult.value.docs) {
       const data = { id: docSnap.id, ...docSnap.data() } as Restaurant
-      // Ensure campusIds fallback so it displays for students
       if (!data.campusIds || data.campusIds.length === 0) {
         data.campusIds = ['aucklandpark', 'buntingroad', 'doornfontein', 'soweto']
       }
       existingRestaurants.push(data)
       restaurantIds.add(data.id)
     }
-  } catch (err: any) {
+  } else {
+    const err = restaurantsSnapResult.reason
     if (err?.code !== 'permission-denied') {
       console.warn('Firestore restaurants fetch warning:', err?.message || err)
     }
   }
 
-  // 2. Fetch products to ensure ANY merchant with products appears as a restaurant!
-  try {
-    const productsRef = collection(db, 'products')
-    const productsSnap = await getDocs(productsRef)
-    
-    if (!productsSnap.empty) {
-      const merchantProductsMap = new Map<string, ProductDoc[]>()
+  // 2. Process products to populate menus and synthesize missing restaurant profiles in parallel
+  if (productsSnapResult.status === 'fulfilled' && !productsSnapResult.value.empty) {
+    const merchantProductsMap = new Map<string, ProductDoc[]>()
 
-      for (const docSnap of productsSnap.docs) {
-        const prod = { id: docSnap.id, ...docSnap.data() } as ProductDoc
-        if (prod.merchantId) {
-          if (!merchantProductsMap.has(prod.merchantId)) {
-            merchantProductsMap.set(prod.merchantId, [])
-          }
-          merchantProductsMap.get(prod.merchantId)!.push(prod)
+    for (const docSnap of productsSnapResult.value.docs) {
+      const prod = { id: docSnap.id, ...docSnap.data() } as ProductDoc
+      if (prod.merchantId) {
+        if (!merchantProductsMap.has(prod.merchantId)) {
+          merchantProductsMap.set(prod.merchantId, [])
         }
-      }
-
-      for (const [merchantId, prods] of merchantProductsMap.entries()) {
-        if (!restaurantIds.has(merchantId)) {
-          const firstProd = prods[0]
-          const categoryName = (firstProd.category || 'Campus Eats').trim()
-          let storeName = `${categoryName} Spot`
-          let storeLocation = 'Campus Center'
-          let campusIds = ['aucklandpark', 'buntingroad', 'doornfontein', 'soweto']
-          let pickupTime = '10-15 min'
-
-          try {
-            const userSnap = await getDoc(doc(db, 'users', merchantId))
-            if (userSnap.exists()) {
-              const uData = userSnap.data()
-              const candidate = uData.storeName || uData.businessName || uData.name || uData.displayName
-              if (candidate && candidate.trim() !== '') {
-                storeName = candidate.trim()
-              } else if (uData.email) {
-                const prefix = uData.email.split('@')[0]
-                storeName = prefix.charAt(0).toUpperCase() + prefix.slice(1) + "'s Kitchen"
-              }
-              if (uData.storeLocation || uData.location) {
-                storeLocation = uData.storeLocation || uData.location
-              }
-              if (uData.campusId && uData.campusId !== 'all') {
-                campusIds = [uData.campusId]
-              }
-              if (uData.pickupTime) {
-                pickupTime = uData.pickupTime
-              }
-            }
-          } catch (e) {
-            console.warn('Could not fetch merchant store name:', e)
-          }
-
-          const storeImage = (firstProd.images && firstProd.images[0]) || '/food/burger.png'
-
-          const synthesizedRestaurant: Restaurant = {
-            id: merchantId,
-            name: storeName,
-            cuisine: categoryName,
-            image: storeImage,
-            rating: 0,
-            reviews: 0,
-            pickupTime: pickupTime,
-            priceLevel: `R ${Number(firstProd.price).toFixed(2)}`,
-            location: storeLocation,
-            open: true,
-            campusIds: campusIds,
-            menu: prods.map(p => ({
-              id: p.id,
-              name: p.name,
-              description: p.description || '',
-              price: p.price,
-              image: (p.images && p.images[0]) || storeImage,
-              section: p.category || 'Menu',
-              modifiers: p.modifierGroups || [],
-            })),
-          }
-
-          existingRestaurants.push(synthesizedRestaurant)
-          restaurantIds.add(merchantId)
-        }
+        merchantProductsMap.get(prod.merchantId)!.push(prod)
       }
     }
-  } catch (err: any) {
+
+    const missingMerchantIds = Array.from(merchantProductsMap.keys()).filter(
+      (id) => !restaurantIds.has(id)
+    )
+
+    // Fetch all missing merchant user docs in parallel instead of sequentially
+    const userDocsMap = new Map<string, DocumentData>()
+    if (missingMerchantIds.length > 0) {
+      const userSnaps = await Promise.allSettled(
+        missingMerchantIds.map((mId) => getDoc(doc(db, 'users', mId)))
+      )
+      userSnaps.forEach((res, idx) => {
+        if (res.status === 'fulfilled' && res.value.exists()) {
+          userDocsMap.set(missingMerchantIds[idx], res.value.data())
+        }
+      })
+    }
+
+    for (const [merchantId, prods] of merchantProductsMap.entries()) {
+      prods.sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0))
+      const firstProd = prods[0]
+      const storeImage = (firstProd.images && firstProd.images[0]) || '/food/burger.png'
+      const mappedMenu = prods.map((p) => ({
+        id: p.id,
+        name: p.name,
+        description: p.description || '',
+        price: Number(p.price) || 0,
+        image: (p.images && p.images[0]) || storeImage,
+        section: (p.category || 'Menu').trim(),
+        modifiers: Array.isArray(p.modifierGroups)
+          ? p.modifierGroups.map((g: any) => ({
+              ...g,
+              options: Array.isArray(g?.options)
+                ? g.options.map((o: any) => ({
+                    ...o,
+                    price: Math.max(0, Number(o?.price) || 0),
+                  }))
+                : [],
+            }))
+          : [],
+      }))
+
+      if (restaurantIds.has(merchantId)) {
+        const existingRest = existingRestaurants.find((r) => r.id === merchantId)
+        if (existingRest) {
+          const baseMenu = existingRest.menu || []
+          const existingMenuIds = new Set(baseMenu.map((m) => m.id))
+          existingRest.menu = [
+            ...baseMenu,
+            ...mappedMenu.filter((m) => !existingMenuIds.has(m.id)),
+          ]
+          if (!existingRest.image) {
+            existingRest.image = storeImage
+          }
+        }
+      } else {
+        const categoryName = (firstProd.category || 'Campus Eats').trim()
+        let storeName = `${categoryName} Spot`
+        let storeLocation = 'Campus Center'
+        let campusIds = ['aucklandpark', 'buntingroad', 'doornfontein', 'soweto']
+        let pickupTime = '10-15 min'
+
+        const uData = userDocsMap.get(merchantId)
+        if (uData) {
+          const candidate =
+            uData.storeName || uData.businessName || uData.name || uData.displayName
+          if (candidate && candidate.trim() !== '') {
+            storeName = candidate.trim()
+          } else if (uData.email) {
+            const prefix = uData.email.split('@')[0]
+            storeName = prefix.charAt(0).toUpperCase() + prefix.slice(1) + "'s Kitchen"
+          }
+          if (uData.storeLocation || uData.location) {
+            storeLocation = uData.storeLocation || uData.location
+          }
+          if (uData.campusId && uData.campusId !== 'all') {
+            campusIds = [uData.campusId]
+          }
+          if (uData.pickupTime) {
+            pickupTime = uData.pickupTime
+          }
+        }
+
+        const synthesizedRestaurant: Restaurant = {
+          id: merchantId,
+          name: storeName,
+          cuisine: categoryName,
+          image: storeImage,
+          rating: 0,
+          reviews: 0,
+          pickupTime: pickupTime,
+          priceLevel: `R ${Number(firstProd.price).toFixed(2)}`,
+          location: storeLocation,
+          open: true,
+          campusIds: campusIds,
+          menu: mappedMenu,
+        }
+
+        existingRestaurants.push(synthesizedRestaurant)
+        restaurantIds.add(merchantId)
+      }
+    }
+  } else if (productsSnapResult.status === 'rejected') {
+    const err = productsSnapResult.reason
     if (err?.code !== 'permission-denied') {
       console.warn('Firestore products-to-restaurants fetch warning:', err?.message || err)
     }
@@ -306,6 +345,23 @@ export async function uploadProductImages(files: File[], merchantId: string): Pr
   return Promise.all(files.map((file) => compressImageFile(file)))
 }
 
+function sanitizeModifierGroups(groups: any[] | undefined): any[] {
+  if (!Array.isArray(groups)) return []
+  return groups.map((g) => ({
+    ...g,
+    title: String(g?.title || '').trim(),
+    required: Boolean(g?.required),
+    type: g?.type === 'multi' ? 'multi' : 'single',
+    options: Array.isArray(g?.options)
+      ? g.options.map((o: any) => ({
+          ...o,
+          label: String(o?.label || '').trim(),
+          price: Math.max(0, Number(o?.price) || 0),
+        }))
+      : [],
+  }))
+}
+
 /** Create a new product in Firestore and ensure restaurant exists */
 export async function createProduct(
   merchantId: string, 
@@ -313,7 +369,17 @@ export async function createProduct(
   imageFiles: File[]
 ) {
   try {
-    const uploadedImageUrls = await uploadProductImages(imageFiles, merchantId)
+    if (!auth.currentUser || auth.currentUser.uid !== merchantId) {
+      throw new Error('Unauthorized: You can only create products for your own store.')
+    }
+
+    const numericPrice = Number(productData.price)
+    if (!Number.isFinite(numericPrice) || numericPrice <= 0) {
+      throw new Error('Product price must be greater than zero.')
+    }
+
+    const uploadedImageUrls =
+      imageFiles.length > 0 ? await uploadProductImages(imageFiles, merchantId) : []
 
     const newDocRef = doc(collection(db, 'products'))
     const newProduct: ProductDoc = {
@@ -321,7 +387,12 @@ export async function createProduct(
       merchantId,
       createdAt: Date.now(),
       ...productData,
-      images: uploadedImageUrls,
+      name: String(productData.name || '').trim(),
+      description: String(productData.description || '').trim(),
+      category: String(productData.category || 'Menu').trim(),
+      price: numericPrice,
+      modifierGroups: sanitizeModifierGroups(productData.modifierGroups),
+      images: uploadedImageUrls.length > 0 ? uploadedImageUrls : productData.images || [],
     }
 
     await setDoc(newDocRef, newProduct)
@@ -336,17 +407,19 @@ export async function createProduct(
         try {
           const userSnap = await getDoc(doc(db, 'users', merchantId))
           if (userSnap.exists()) storeName = userSnap.data().name || storeName
-        } catch {}
+        } catch (_e) {
+          // Ignore user doc lookup error
+        }
 
         await setDoc(restaurantRef, {
           id: merchantId,
           name: storeName,
-          cuisine: productData.category || 'Campus Food',
-          image: (uploadedImageUrls && uploadedImageUrls[0]) || '/food/burger.png',
+          cuisine: newProduct.category || 'Campus Food',
+          image: (newProduct.images && newProduct.images[0]) || '/food/burger.png',
           rating: 5.0,
           reviews: 1,
           pickupTime: '10-15 min',
-          priceLevel: `R ${productData.price}`,
+          priceLevel: `R ${numericPrice}`,
           location: 'Campus Center',
           open: true,
           campusIds: ['aucklandpark', 'buntingroad', 'doornfontein', 'soweto'],
@@ -367,9 +440,20 @@ export async function createProduct(
 /** Update an existing product price (supports decimals like 14.90) */
 export async function updateProductPrice(productId: string, newPrice: number) {
   try {
+    const numericPrice = Number(newPrice)
+    if (!Number.isFinite(numericPrice) || numericPrice <= 0) {
+      throw new Error('Product price must be greater than zero.')
+    }
+    if (!auth.currentUser) {
+      throw new Error('Unauthorized: You must be signed in.')
+    }
     const productRef = doc(db, 'products', productId)
+    const snap = await getDoc(productRef)
+    if (snap.exists() && snap.data().merchantId !== auth.currentUser.uid) {
+      throw new Error('Unauthorized: You can only edit your own store products.')
+    }
     await updateDoc(productRef, {
-      price: newPrice,
+      price: numericPrice,
       updatedAt: Date.now()
     })
   } catch (error) {
@@ -386,6 +470,16 @@ export async function updateProduct(
   newImageFiles?: File[]
 ) {
   try {
+    if (!auth.currentUser || auth.currentUser.uid !== merchantId) {
+      throw new Error('Unauthorized: You can only update products for your own store.')
+    }
+
+    const productRef = doc(db, 'products', productId)
+    const snap = await getDoc(productRef)
+    if (snap.exists() && snap.data().merchantId !== auth.currentUser.uid) {
+      throw new Error('Unauthorized: Product belongs to another merchant.')
+    }
+
     let finalImages = updates.images || []
 
     if (newImageFiles && newImageFiles.length > 0) {
@@ -397,12 +491,23 @@ export async function updateProduct(
       }
     }
 
-    const productRef = doc(db, 'products', productId)
-    await updateDoc(productRef, {
+    const sanitizedUpdates: Record<string, any> = {
       ...updates,
       images: finalImages,
-      updatedAt: Date.now()
-    })
+      updatedAt: Date.now(),
+    }
+    if (updates.price !== undefined) {
+      const numericPrice = Number(updates.price)
+      if (!Number.isFinite(numericPrice) || numericPrice <= 0) {
+        throw new Error('Product price must be greater than zero.')
+      }
+      sanitizedUpdates.price = numericPrice
+    }
+    if (updates.modifierGroups !== undefined) {
+      sanitizedUpdates.modifierGroups = sanitizeModifierGroups(updates.modifierGroups)
+    }
+
+    await updateDoc(productRef, sanitizedUpdates)
   } catch (error) {
     console.error("Failed to update product:", error)
     throw error
@@ -412,7 +517,14 @@ export async function updateProduct(
 /** Delete an existing product from Firestore */
 export async function deleteProduct(productId: string) {
   try {
+    if (!auth.currentUser) {
+      throw new Error('Unauthorized: You must be signed in.')
+    }
     const productRef = doc(db, 'products', productId)
+    const snap = await getDoc(productRef)
+    if (snap.exists() && snap.data().merchantId !== auth.currentUser.uid) {
+      throw new Error('Unauthorized: You can only delete your own store products.')
+    }
     await deleteDoc(productRef)
   } catch (error) {
     console.error("Failed to delete product:", error)

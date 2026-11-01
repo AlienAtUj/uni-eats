@@ -11,6 +11,7 @@ import {
   CardIcon,
   ChevronRightIcon,
   CheckIcon,
+  LockIcon,
 } from '@/components/icons'
 import { cn } from '@/lib/utils'
 
@@ -37,6 +38,7 @@ declare global {
         amount: number
         currency?: string
         ref?: string
+        access_code?: string
         metadata?: Record<string, any>
         callback: (response: { reference: string; status: string }) => void
         onClose: () => void
@@ -114,24 +116,50 @@ export function CheckoutScreen() {
 
     setIsProcessingPayment(true)
     const customerEmail = user?.email || 'student@campus.unieats.co.za'
-    const reference = `UE_${Date.now()}_${Math.floor(1000 + Math.random() * 9000)}`
-    const amountInCents = Math.round(total * 100)
+    const cartPayload = cart.map((line) => ({
+      itemId: line.itemId,
+      quantity: line.quantity,
+      unitPrice: line.unitPrice,
+      modifierLabels: line.modifierLabels,
+    }))
+    const orderMetadata = {
+      customerId: user?.uid || 'guest-user',
+      restaurantId: cart[0]?.restaurantId,
+      restaurantName: cart[0]?.restaurantName,
+      pickupTime,
+    }
 
     try {
+      // 1. Initialize transaction on server to verify Firestore prices and lock reference
+      const initRes = await fetch('/api/paystack/initialize', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          email: customerEmail,
+          amountZar: total,
+          items: cartPayload,
+          metadata: orderMetadata,
+        }),
+      })
+
+      const initData = await initRes.json()
+      if (!initRes.ok || !initData.reference) {
+        setPaymentError(
+          initData.error || 'Could not initialize secure payment session on the server.'
+        )
+        setIsProcessingPayment(false)
+        return
+      }
+
       const handler = window.PaystackPop.setup({
         key: publicKey,
         email: customerEmail,
-        amount: amountInCents,
+        amount: initData.amountInCents,
         currency: 'ZAR',
-        ref: reference,
-        metadata: {
-          customerId: user?.uid || 'guest-user',
-          restaurantId: cart[0]?.restaurantId,
-          restaurantName: cart[0]?.restaurantName,
-          pickupTime,
-        },
+        ref: initData.reference,
+        metadata: orderMetadata,
         callback: (response) => {
-          // Verify transaction server-to-server before creating the order
+          // 2. Verify transaction server-to-server before creating the order
           ;(async () => {
             try {
               const verifyRes = await fetch('/api/paystack/verify', {
@@ -139,7 +167,8 @@ export function CheckoutScreen() {
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
                   reference: response.reference,
-                  expectedAmountZar: total,
+                  expectedAmountZar: initData.amountZar || total,
+                  items: cartPayload,
                 }),
               })
 
@@ -147,17 +176,20 @@ export function CheckoutScreen() {
 
               if (!verifyRes.ok || !verifyData.verified) {
                 setPaymentError(
-                  verifyData.error || 'Payment verification failed on the server. Please contact support with ref: ' + response.reference
+                  verifyData.error ||
+                    'Payment verification failed on the server. Please contact support with ref: ' +
+                      response.reference
                 )
                 setIsProcessingPayment(false)
                 return
               }
 
-              // Server verified payment amount and status === 'success'
+              // 3. Server verified payment amount, currency, and status === 'success'
               await placeOrder({
                 paymentReference: verifyData.reference,
                 paymentStatus: 'paid',
                 paymentChannel: verifyData.channel || 'paystack',
+                verifiedTotalZar: verifyData.amountZar,
               })
             } catch (err) {
               console.error('Error verifying payment:', err)
@@ -249,7 +281,7 @@ export function CheckoutScreen() {
         {/* Security Badge */}
         {paymentMethod.startsWith('Paystack') && (
           <div className="flex items-center gap-2 rounded-xl bg-primary/10 px-3.5 py-2.5 text-xs font-medium text-primary">
-            <span>🔒</span>
+            <LockIcon className="h-4 w-4 shrink-0" />
             <span>Secured by Paystack (256-bit SSL encrypted, server-verified)</span>
           </div>
         )}
