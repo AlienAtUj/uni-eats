@@ -183,6 +183,8 @@ export function buildDashMarket(areaIds: string[]): Restaurant {
     open: true,
     campusIds: areaIds,
     storeType: 'grocery',
+    coords: { lat: -26.1900, lng: 28.0400 },
+    deliveryRadiusKm: 15,
     menu: DASH_MARKET_PRODUCTS,
   }
 }
@@ -190,4 +192,46 @@ export function buildDashMarket(areaIds: string[]): Restaurant {
 export function departmentForItem(item: MenuItem): Department | undefined {
   const sec = (item.section || '').toLowerCase()
   return DEPARTMENTS.find((d) => d.title.toLowerCase() === sec)
+}
+
+export function groceryMatchesDepartment(item: MenuItem, dept: Department): boolean {
+  const sec = (item.section || '').toLowerCase().trim()
+  const title = dept.title.toLowerCase().trim()
+  if (sec === title) return true
+  if (dept.id === 'pantry' && (sec.includes('pantry') || sec.includes('essential') || sec.includes('staple') || sec.includes('grocer'))) {
+    return true
+  }
+  if (dept.id === 'bread-milk' && (sec.includes('bread') || sec.includes('milk') || sec.includes('dairy') || sec.includes('bakery') || sec.includes('egg'))) {
+    return true
+  }
+  if (dept.id === 'fresh-produce' && (sec.includes('produce') || sec.includes('fruit') || sec.includes('veg'))) {
+    return true
+  }
+  if (dept.id === 'butcher' && (sec.includes('butcher') || sec.includes('meat') || sec.includes('braai'))) {
+    return true
+  }
+  if (dept.id === 'snacks-drinks' && (sec.includes('snack') || sec.includes('drink') || sec.includes('chip') || sec.includes('sweet') || sec.includes('water'))) {
+    return true
+  }
+  if (dept.id === 'household' && (sec.includes('household') || sec.includes('clean') || sec.includes('toiletr'))) {
+    return true
+  }
+  return false
+}
+
+/** Collects grocery items from in-range grocery stores in shortest-distance order. */
+export function collectGroceries(stores: Restaurant[]): Array<{ item: MenuItem; store: Restaurant }> {
+  const list: Array<{ item: MenuItem; store: Restaurant }> = []
+  const seen = new Set<string>()
+  for (const store of stores) {
+    for (const item of store.menu || []) {
+      if (seen.has(item.id)) continue
+      seen.add(item.id)
+      list.push({
+        item: { ...item, image: item.image || store.image || '/food/spaza-store.jpg' },
+        store,
+      })
+    }
+  }
+  return list
 }

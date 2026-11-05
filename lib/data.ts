@@ -1,4 +1,5 @@
 import { buildDashMarket } from './grocery-catalog'
+import type { Coordinates } from './location'
 
 export type Campus = {
   id: string
@@ -55,6 +56,8 @@ export type Restaurant = {
   open: boolean
   campusIds: string[]
   storeType?: StoreType
+  coords?: Coordinates
+  deliveryRadiusKm?: number
   menu: MenuItem[]
 }
 
@@ -139,10 +142,12 @@ export const defaultRestaurants: Restaurant[] = [
     deliveryFee: 'R15 delivery',
     distance: '0.6 km',
     priceLevel: 'R 59.95',
-    location: 'Near You',
+    location: 'Doornfontein • Johannesburg',
     open: true,
     campusIds: allAreaIds,
     storeType: 'restaurant',
+    coords: { lat: -26.1965, lng: 28.0580 },
+    deliveryRadiusKm: 15,
     menu: [
       {
         id: 'sml-crumbed-chicken-burger',
@@ -332,10 +337,12 @@ export const defaultRestaurants: Restaurant[] = [
     deliveryFee: 'R12 delivery',
     distance: '0.8 km',
     priceLevel: 'R 68.95',
-    location: 'Near You',
+    location: 'Doornfontein • Johannesburg',
     open: true,
     campusIds: allAreaIds,
     storeType: 'restaurant',
+    coords: { lat: -26.1965, lng: 28.0580 },
+    deliveryRadiusKm: 15,
     menu: [
       {
         id: 'cfk-pepperoni-pizza',
@@ -386,10 +393,12 @@ export const defaultGroceryStores: Restaurant[] = [
     deliveryFee: 'R10 delivery',
     distance: '0.4 km',
     priceLevel: 'R 18.99',
-    location: 'Near You',
+    location: 'Doornfontein • Johannesburg',
     open: true,
     campusIds: allAreaIds,
     storeType: 'grocery',
+    coords: { lat: -26.1970, lng: 28.0590 },
+    deliveryRadiusKm: 15,
     menu: [
       {
         id: 'spaza-albany-bread',
@@ -487,10 +496,12 @@ export const defaultGroceryStores: Restaurant[] = [
     deliveryFee: 'R15 delivery',
     distance: '0.7 km',
     priceLevel: 'R 69.95',
-    location: 'Near You',
+    location: 'Braamfontein • Johannesburg',
     open: true,
     campusIds: allAreaIds,
     storeType: 'grocery',
+    coords: { lat: -26.1920, lng: 28.0350 },
+    deliveryRadiusKm: 15,
     menu: [
       {
         id: 'butcher-tbone-steak',
@@ -552,10 +563,12 @@ export const defaultGroceryStores: Restaurant[] = [
     deliveryFee: 'R12 delivery',
     distance: '0.9 km',
     priceLevel: 'R 24.99',
-    location: 'Near You',
+    location: 'Auckland Park • Johannesburg',
     open: true,
     campusIds: allAreaIds,
     storeType: 'grocery',
+    coords: { lat: -26.1820, lng: 28.0080 },
+    deliveryRadiusKm: 15,
     menu: [
       {
         id: 'produce-spinach-tomato',

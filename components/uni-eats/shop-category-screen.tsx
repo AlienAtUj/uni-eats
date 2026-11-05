@@ -3,9 +3,17 @@
 import Image from 'next/image'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { restaurants, type MenuItem, type Restaurant } from '@/lib/data'
-import { DASH_MARKET_ID, DEPARTMENTS, buildDashMarket, type Department } from '@/lib/grocery-catalog'
+import {
+  DASH_MARKET_ID,
+  DEPARTMENTS,
+  buildDashMarket,
+  collectGroceries,
+  groceryMatchesDepartment,
+  type Department,
+} from '@/lib/grocery-catalog'
 import { MEAL_CATEGORIES, collectMeals, mealMatchesCategory, type MealEntry } from '@/lib/meal-catalog'
 import { useFirebaseRestaurants } from '@/lib/firebase-db'
+import { formatDistanceKm } from '@/lib/location'
 import { useStore } from './store'
 import { ProductCard, ProductSheet } from './product-card'
 import { ArrowLeftIcon, SearchIcon, ChevronRightIcon } from '@/components/icons'
@@ -18,9 +26,10 @@ export function useDashMarket(): Restaurant {
   )
 }
 
-type SortKey = 'popular' | 'price-asc' | 'price-desc' | 'specials'
+type SortKey = 'nearest' | 'popular' | 'price-asc' | 'price-desc' | 'specials'
 
 const SORTS: { key: SortKey; label: string }[] = [
+  { key: 'nearest', label: 'Nearest first' },
   { key: 'popular', label: 'Popular' },
   { key: 'specials', label: 'Specials' },
   { key: 'price-asc', label: 'Price: Low to High' },
@@ -28,7 +37,15 @@ const SORTS: { key: SortKey; label: string }[] = [
 ]
 
 export function ShopCategoryScreen() {
-  const { activeDepartmentId, openDepartment, goHome } = useStore()
+  const {
+    activeDepartmentId,
+    openDepartment,
+    goHome,
+    isStoreInRange,
+    getStoreDistanceKm,
+    getStoreDeliveryFee,
+    getStoreDeliveryTime,
+  } = useStore()
   const market = useDashMarket()
   const { restaurants: liveRestaurants } = useFirebaseRestaurants()
 
@@ -40,13 +57,36 @@ export function ShopCategoryScreen() {
 
   const allEntries =
     liveRestaurants && liveRestaurants.length > 0 ? liveRestaurants : restaurants
+
+  // Enrich in-range stores with real-time distance & sort by shortest distance first
+  const inRangeSortedStores = useMemo(() => {
+    return allEntries
+      .filter((r) => isStoreInRange(r))
+      .map((r) => {
+        const distKm = getStoreDistanceKm(r)
+        return {
+          ...r,
+          distKm,
+          distance: formatDistanceKm(distKm),
+          deliveryFee: getStoreDeliveryFee(r),
+          pickupTime: getStoreDeliveryTime(r),
+        }
+      })
+      .sort((a, b) => a.distKm - b.distKm)
+  }, [allEntries, isStoreInRange, getStoreDistanceKm, getStoreDeliveryFee, getStoreDeliveryTime])
+
   const mealRestaurants = useMemo(
-    () => allEntries.filter((r) => r.storeType !== 'grocery'),
-    [allEntries]
+    () => inRangeSortedStores.filter((r) => r.storeType !== 'grocery'),
+    [inRangeSortedStores]
+  )
+
+  const groceryStores = useMemo(
+    () => inRangeSortedStores.filter((r) => r.storeType === 'grocery'),
+    [inRangeSortedStores]
   )
 
   const [sub, setSub] = useState<string>('All')
-  const [sort, setSort] = useState<SortKey>('popular')
+  const [sort, setSort] = useState<SortKey>('nearest')
   const [searchOpen, setSearchOpen] = useState(false)
   const [query, setQuery] = useState('')
   const [selected, setSelected] = useState<{ item: MenuItem; store: Restaurant } | null>(null)
@@ -68,10 +108,10 @@ export function ShopCategoryScreen() {
         mealMatchesCategory(entry.item, mealCat)
       )
     }
-    return market.menu
-      .filter((m) => m.section === activeCategory.title)
-      .map((item) => ({ item, store: market }))
-  }, [isMealMode, activeCategory, mealRestaurants, market])
+    return collectGroceries(groceryStores).filter((entry) =>
+      groceryMatchesDepartment(entry.item, activeCategory)
+    )
+  }, [isMealMode, activeCategory, mealRestaurants, groceryStores])
 
   const visible: MealEntry[] = useMemo(() => {
     const q = query.trim().toLowerCase()
@@ -87,14 +127,30 @@ export function ShopCategoryScreen() {
       list = list.filter(({ item }) => item.oldPrice && item.oldPrice > item.price)
     }
     const sorted = [...list]
-    if (sort === 'price-asc') sorted.sort((a, b) => a.item.price - b.item.price)
-    else if (sort === 'price-desc') sorted.sort((a, b) => b.item.price - a.item.price)
-    else sorted.sort((a, b) => Number(!!b.item.popular) - Number(!!a.item.popular))
+    if (sort === 'nearest') {
+      sorted.sort((a, b) => {
+        const distDiff = getStoreDistanceKm(a.store) - getStoreDistanceKm(b.store)
+        if (Math.abs(distDiff) > 0.05) return distDiff
+        return Number(!!b.item.popular) - Number(!!a.item.popular)
+      })
+    } else if (sort === 'price-asc') {
+      sorted.sort((a, b) => a.item.price - b.item.price)
+    } else if (sort === 'price-desc') {
+      sorted.sort((a, b) => b.item.price - a.item.price)
+    } else {
+      sorted.sort((a, b) => {
+        const popDiff = Number(!!b.item.popular) - Number(!!a.item.popular)
+        if (popDiff !== 0) return popDiff
+        return getStoreDistanceKm(a.store) - getStoreDistanceKm(b.store)
+      })
+    }
     return sorted
-  }, [categoryEntries, sub, sort, query])
+  }, [categoryEntries, sub, sort, query, getStoreDistanceKm])
 
   const groups = useMemo(() => {
-    if (sub !== 'All' || sort !== 'popular' || query) return [{ title: '', entries: visible }]
+    if (sub !== 'All' || (sort !== 'nearest' && sort !== 'popular') || query) {
+      return [{ title: '', entries: visible }]
+    }
     const subGroups = activeCategory.subcategories
       .map((s) => ({
         title: s,
@@ -155,7 +211,7 @@ export function ShopCategoryScreen() {
                     {activeCategory.title}
                   </h1>
                   <p className="text-xs font-medium text-white/70">
-                    {categoryEntries.length} {isMealMode ? 'meals near you' : `products · ${market.name}`}
+                    {categoryEntries.length} {isMealMode ? 'meals near you' : 'products near you'}
                   </p>
                 </div>
                 <button
@@ -284,7 +340,11 @@ export function ShopCategoryScreen() {
                     key={item.id}
                     item={item}
                     store={store}
-                    subtitle={isMealMode ? `${store.name}${item.size ? ` · ${item.size}` : ''}` : item.size}
+                    subtitle={
+                      isMealMode
+                        ? `${store.name}${store.distance ? ` • ${store.distance}` : ''}`
+                        : `${item.size ? `${item.size} • ` : ''}${store.name}${store.distance ? ` • ${store.distance}` : ''}`
+                    }
                     onOpen={(it, st) => setSelected({ item: it, store: st })}
                   />
                 ))}

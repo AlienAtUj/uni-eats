@@ -9,6 +9,16 @@ import {
   type ReactNode,
 } from 'react'
 import { campuses, restaurants, type Restaurant } from '@/lib/data'
+import {
+  type DeliveryLocation,
+  SERVICE_DELIVERY_RADIUS_KM,
+  reverseGeocodeCoords,
+  calculateDistanceKm,
+  resolveStoreCoords,
+  geocodeStoreAddress,
+  calculateDeliveryFee,
+  calculateDeliveryTime,
+} from '@/lib/location'
 import { onAuthStateChanged, signOut as firebaseSignOut, type User } from 'firebase/auth'
 import { auth } from '@/lib/firebase'
 import { fetchUserRole, type UserRole } from '@/lib/firebase-auth'
@@ -49,6 +59,16 @@ type Store = {
   screen: Screen
   homeMode: HomeMode
   setHomeMode: (m: HomeMode) => void
+  userLocation: DeliveryLocation | null
+  setUserLocation: (loc: DeliveryLocation | null) => void
+  recentLocations: DeliveryLocation[]
+  isLocatingGps: boolean
+  locationError: string | null
+  detectUserLocation: () => Promise<DeliveryLocation | null>
+  getStoreDistanceKm: (store: Restaurant) => number
+  getStoreDeliveryFee: (store: Restaurant) => string
+  getStoreDeliveryTime: (store: Restaurant) => string
+  isStoreInRange: (store: Restaurant) => boolean
   campusId: string
   setCampus: (id: string) => void
   customLocationLabel: string | null
@@ -104,6 +124,10 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   const [homeMode, setHomeMode] = useState<HomeMode>('eat')
   const [campusId, setCampusId] = useState(campuses[0].id)
   const [customLocationLabel, setCustomLocationLabel] = useState<string | null>(null)
+  const [userLocation, setUserLocationState] = useState<DeliveryLocation | null>(null)
+  const [recentLocations, setRecentLocations] = useState<DeliveryLocation[]>([])
+  const [isLocatingGps, setIsLocatingGps] = useState(true)
+  const [locationError, setLocationError] = useState<string | null>(null)
   const [activeId, setActiveId] = useState<string | null>(null)
   const [activeDepartmentId, setActiveDepartmentId] = useState<string | null>(null)
   const [cart, setCart] = useState<CartLine[]>([])
@@ -111,9 +135,99 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   const [paymentMethod, setPaymentMethod] = useState('Paystack (Card / EFT / SnapScan)')
   const [placedOrder, setPlacedOrder] = useState<PlacedOrder | null>(null)
 
-  // Hydrate cart and active order from localStorage on mount
+  const saveRecentLocation = (loc: DeliveryLocation) => {
+    setRecentLocations((prev) => {
+      const filtered = prev.filter((item) => item.label.toLowerCase() !== loc.label.toLowerCase())
+      const next = [loc, ...filtered].slice(0, 5)
+      try {
+        localStorage.setItem('dash_recent_locations', JSON.stringify(next))
+      } catch (_e) {}
+      return next
+    })
+  }
+
+  const setUserLocation = (loc: DeliveryLocation | null) => {
+    setUserLocationState(loc)
+    setLocationError(null)
+    setCustomLocationLabel(loc ? loc.label : null)
+    try {
+      if (loc) {
+        localStorage.setItem('dash_live_location', JSON.stringify(loc))
+        saveRecentLocation(loc)
+      } else {
+        localStorage.removeItem('dash_live_location')
+      }
+    } catch (_e) {}
+  }
+
+  const detectUserLocation = async (): Promise<DeliveryLocation | null> => {
+    if (typeof window === 'undefined' || !('geolocation' in navigator)) {
+      setLocationError('Geolocation is not supported by your browser. Please search and select your delivery address.')
+      setIsLocatingGps(false)
+      return null
+    }
+    setIsLocatingGps(true)
+    setLocationError(null)
+    return new Promise((resolve) => {
+      navigator.geolocation.getCurrentPosition(
+        async (pos) => {
+          try {
+            const { latitude, longitude } = pos.coords
+            const resolved = await reverseGeocodeCoords(latitude, longitude)
+            setUserLocation(resolved)
+            resolve(resolved)
+          } catch (err) {
+            console.warn('Geolocation reverse geocode failed:', err)
+            setLocationError('Could not resolve your street address. Please search and enter your address.')
+            resolve(null)
+          } finally {
+            setIsLocatingGps(false)
+          }
+        },
+        (err) => {
+          console.warn('Geolocation permission or lookup error:', err?.message || err)
+          setLocationError('Location access was denied or unavailable. Please enter your delivery address to see stores near you.')
+          setIsLocatingGps(false)
+          resolve(null)
+        },
+        { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }
+      )
+    })
+  }
+
+  // Hydrate cart, active order, and real-time location on mount
   useEffect(() => {
     try {
+      // Remove any legacy fake fallback keys
+      localStorage.removeItem('dash_delivery_location')
+      localStorage.removeItem('dash_selected_radius')
+
+      const savedRecents = localStorage.getItem('dash_recent_locations')
+      if (savedRecents) {
+        const parsedRecents = JSON.parse(savedRecents)
+        if (Array.isArray(parsedRecents)) {
+          setRecentLocations(
+            parsedRecents.filter(
+              (r: any) => r && r.coords && Number.isFinite(r.coords.lat) && Number.isFinite(r.coords.lng)
+            )
+          )
+        }
+      }
+
+      const savedLoc = localStorage.getItem('dash_live_location')
+      if (savedLoc) {
+        const parsed = JSON.parse(savedLoc)
+        if (parsed && parsed.coords && Number.isFinite(parsed.coords.lat) && Number.isFinite(parsed.coords.lng)) {
+          setUserLocationState(parsed)
+          setCustomLocationLabel(parsed.label)
+          setIsLocatingGps(false)
+        } else {
+          detectUserLocation()
+        }
+      } else {
+        detectUserLocation()
+      }
+
       const savedCart = localStorage.getItem('unieats_cart')
       if (savedCart) {
         const parsed = JSON.parse(savedCart)
@@ -293,6 +407,55 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     [cart],
   )
 
+  const [, setGeoTick] = useState(0)
+
+  useEffect(() => {
+    let cancelled = false
+    async function geocodeMissingStores() {
+      let updated = false
+      for (const r of currentRestaurants) {
+        if (!r.coords && r.location) {
+          const found = await geocodeStoreAddress(r.location)
+          if (found) updated = true
+        }
+      }
+      if (updated && !cancelled) {
+        setGeoTick((t) => t + 1)
+      }
+    }
+    geocodeMissingStores()
+    return () => {
+      cancelled = true
+    }
+  }, [currentRestaurants])
+
+  const getStoreDistanceKm = (store: Restaurant): number => {
+    if (!userLocation || !userLocation.coords) return Infinity
+    const coords = resolveStoreCoords(store)
+    return calculateDistanceKm(userLocation.coords, coords)
+  }
+
+  const getStoreDeliveryFee = (store: Restaurant): string => {
+    const dist = getStoreDistanceKm(store)
+    return calculateDeliveryFee(dist, store.storeType === 'grocery')
+  }
+
+  const getStoreDeliveryTime = (store: Restaurant): string => {
+    const dist = getStoreDistanceKm(store)
+    return calculateDeliveryTime(dist, store.storeType === 'grocery')
+  }
+
+  const isStoreInRange = (store: Restaurant): boolean => {
+    if (!userLocation || !userLocation.coords) return false
+    const dist = getStoreDistanceKm(store)
+    if (!Number.isFinite(dist)) return false
+    const maxRadius = Math.min(
+      store.deliveryRadiusKm || SERVICE_DELIVERY_RADIUS_KM,
+      SERVICE_DELIVERY_RADIUS_KM
+    )
+    return dist <= maxRadius
+  }
+
   const value: Store = {
     screen,
     homeMode,
@@ -304,6 +467,16 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         // Ignore storage errors
       }
     },
+    userLocation,
+    setUserLocation,
+    recentLocations,
+    isLocatingGps,
+    locationError,
+    detectUserLocation,
+    getStoreDistanceKm,
+    getStoreDeliveryFee,
+    getStoreDeliveryTime,
+    isStoreInRange,
     campusId,
     setCampus: (id) => {
       setCampusId(id)

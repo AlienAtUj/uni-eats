@@ -8,12 +8,15 @@ import {
   UserIcon,
   ReceiptIcon,
   StoreIcon,
+  BagIcon,
   LogOutIcon,
 } from '@/components/icons'
 import { signInWithEmailAndPassword, createUserWithEmailAndPassword } from 'firebase/auth'
-import { auth } from '@/lib/firebase'
-import { dashboardPathForRole, fetchUserRole, saveUserProfile, type UserRole } from '@/lib/firebase-auth'
-import { campuses } from '@/lib/data'
+import { doc, setDoc } from 'firebase/firestore'
+import { auth, db } from '@/lib/firebase'
+import { dashboardPathForRole, fetchUserRole, saveUserProfile, type UserRole, type UserProfileInput } from '@/lib/firebase-auth'
+import { type StoreType } from '@/lib/data'
+import { geocodeStoreAddress, SERVICE_DELIVERY_RADIUS_KM } from '@/lib/location'
 import { useStore } from './store'
 
 export function ProfileScreen() {
@@ -158,11 +161,12 @@ function AuthSignupForm({ onSwitch }: { onSwitch: () => void }) {
   const [studentId, setStudentId] = useState('')
   
   const [storeName, setStoreName] = useState('')
+  const [storeType, setStoreType] = useState<StoreType>('restaurant')
+  const [storeLocation, setStoreLocation] = useState('')
   
   // Shared fields
   const [email, setEmail] = useState('')
   const [phone, setPhone] = useState('')
-  const [campusId, setCampusId] = useState('aucklandpark')
   
   // Passwords
   const [password, setPassword] = useState('')
@@ -184,28 +188,65 @@ function AuthSignupForm({ onSwitch }: { onSwitch: () => void }) {
 
     try {
       const userCredential = await createUserWithEmailAndPassword(auth, email, password)
-      
-      const profileData = role === 'student'
-        ? {
-            email,
-            role,
-            phone,
-            campusId,
-            name: `${firstName} ${lastName}`.trim(),
-            firstName,
-            lastName,
-            studentId,
-          }
-        : {
-            email,
-            role,
-            phone,
-            campusId,
-            name: storeName,
-            storeName,
-          }
+      const uid = userCredential.user.uid
 
-      await saveUserProfile(userCredential.user.uid, profileData)
+      if (role === 'student') {
+        await saveUserProfile(uid, {
+          email,
+          role,
+          phone,
+          name: `${firstName} ${lastName}`.trim(),
+          firstName,
+          lastName,
+          studentId,
+        })
+      } else {
+        const cleanStoreName = storeName.trim()
+        const cleanLoc = storeLocation.trim() || 'Johannesburg'
+        const resolvedCoords = await geocodeStoreAddress(cleanLoc)
+
+        const merchantProfile: UserProfileInput = {
+          email,
+          role,
+          phone,
+          name: cleanStoreName,
+          storeName: cleanStoreName,
+          storeType,
+          storeLocation: cleanLoc,
+          deliveryRadiusKm: SERVICE_DELIVERY_RADIUS_KM,
+        }
+        if (resolvedCoords) {
+          merchantProfile.coords = resolvedCoords
+        }
+
+        await saveUserProfile(uid, merchantProfile)
+
+        const restDocPayload: Record<string, any> = {
+          id: uid,
+          name: cleanStoreName,
+          cuisine: storeType === 'grocery' ? 'Groceries & Essentials' : 'Meals & Takeaways',
+          image: storeType === 'grocery' ? '/food/spaza-store.jpg' : '/food/featured-burger.jpg',
+          rating: 5.0,
+          reviews: 1,
+          pickupTime: storeType === 'grocery' ? '20-30 min' : '15-25 min',
+          priceLevel: 'R 45.00',
+          location: cleanLoc,
+          open: true,
+          storeType,
+          deliveryRadiusKm: SERVICE_DELIVERY_RADIUS_KM,
+          menu: [],
+        }
+        if (resolvedCoords) {
+          restDocPayload.coords = resolvedCoords
+        }
+
+        try {
+          await setDoc(doc(db, 'restaurants', uid), restDocPayload, { merge: true })
+        } catch (restErr) {
+          console.warn('Could not initialize restaurant doc on signup:', restErr)
+        }
+      }
+
       await reloadUserRole()
       if (role === 'merchant') {
         router.replace(dashboardPathForRole(role))
@@ -282,61 +323,74 @@ function AuthSignupForm({ onSwitch }: { onSwitch: () => void }) {
             </div>
             
             <div className="flex flex-col gap-2">
-              <label className="text-sm font-bold text-foreground">Student ID Number</label>
+              <label className="text-sm font-bold text-foreground">ID / Account Number (Optional)</label>
               <input 
                 type="text"
                 value={studentId}
                 onChange={(e) => setStudentId(e.target.value)}
                 className="w-full rounded-2xl border bg-card px-4 py-3 text-sm outline-none transition-all focus:border-primary focus:ring-1 focus:ring-primary shadow-sm placeholder:text-muted-foreground"
-                placeholder="220123456"
-                required
+                placeholder="Optional ID number"
               />
-            </div>
-            
-            <div className="flex flex-col gap-2">
-              <label className="text-sm font-bold text-foreground">Area / Location</label>
-              <select
-                value={campusId}
-                onChange={(e) => setCampusId(e.target.value)}
-                className="w-full rounded-2xl border bg-card px-4 py-3 text-sm outline-none transition-all focus:border-primary focus:ring-1 focus:ring-primary shadow-sm placeholder:text-muted-foreground"
-                required
-              >
-                {campuses.map((c) => (
-                  <option key={c.id} value={c.id}>
-                    {c.name} ({c.location})
-                  </option>
-                ))}
-              </select>
             </div>
           </>
         ) : (
           <>
             <div className="flex flex-col gap-2">
-              <label className="text-sm font-bold text-foreground">Store or Restaurant Name</label>
+              <label className="text-sm font-bold text-foreground">Business Type</label>
+              <div className="grid grid-cols-2 gap-3">
+                <button
+                  type="button"
+                  onClick={() => setStoreType('restaurant')}
+                  className={`flex flex-col items-start gap-1 rounded-2xl border p-3.5 text-left transition-colors ${
+                    storeType === 'restaurant'
+                      ? 'border-primary bg-primary/10 text-primary ring-1 ring-primary'
+                      : 'bg-card text-muted-foreground'
+                  }`}
+                >
+                  <StoreIcon className="h-5 w-5" />
+                  <span className="text-xs font-extrabold text-foreground">Restaurant Owner</span>
+                  <span className="text-[11px] text-muted-foreground">Meals, Burgers & Kotas</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setStoreType('grocery')}
+                  className={`flex flex-col items-start gap-1 rounded-2xl border p-3.5 text-left transition-colors ${
+                    storeType === 'grocery'
+                      ? 'border-primary bg-primary/10 text-primary ring-1 ring-primary'
+                      : 'bg-card text-muted-foreground'
+                  }`}
+                >
+                  <BagIcon className="h-5 w-5" />
+                  <span className="text-xs font-extrabold text-foreground">Shop / Grocery Owner</span>
+                  <span className="text-[11px] text-muted-foreground">Groceries, Spaza & Butcher</span>
+                </button>
+              </div>
+            </div>
+
+            <div className="flex flex-col gap-2">
+              <label className="text-sm font-bold text-foreground">
+                {storeType === 'grocery' ? 'Shop / Supermarket Name' : 'Restaurant Name'}
+              </label>
               <input 
                 type="text"
                 value={storeName}
                 onChange={(e) => setStoreName(e.target.value)}
                 className="w-full rounded-2xl border bg-card px-4 py-3 text-sm outline-none transition-all focus:border-primary focus:ring-1 focus:ring-primary shadow-sm placeholder:text-muted-foreground"
-                placeholder="e.g. SML Restaurant or Doornfontein Spaza"
+                placeholder={storeType === 'grocery' ? 'e.g. Doornfontein Spaza & Fresh Mart' : 'e.g. SML Restaurant & Grill'}
                 required
               />
             </div>
             
             <div className="flex flex-col gap-2">
-              <label className="text-sm font-bold text-foreground">Store Area</label>
-              <select
-                value={campusId}
-                onChange={(e) => setCampusId(e.target.value)}
+              <label className="text-sm font-bold text-foreground">Store Street Address & Suburb</label>
+              <input
+                type="text"
+                value={storeLocation}
+                onChange={(e) => setStoreLocation(e.target.value)}
                 className="w-full rounded-2xl border bg-card px-4 py-3 text-sm outline-none transition-all focus:border-primary focus:ring-1 focus:ring-primary shadow-sm placeholder:text-muted-foreground"
+                placeholder="e.g. 37 Beit Street, Doornfontein, Johannesburg"
                 required
-              >
-                {campuses.map((c) => (
-                  <option key={c.id} value={c.id}>
-                    {c.name} ({c.location})
-                  </option>
-                ))}
-              </select>
+              />
             </div>
           </>
         )}

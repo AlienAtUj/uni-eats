@@ -104,6 +104,18 @@ export async function saveUserProfile(uid: string, data: UserProfileInput) {
   if (typeof data.studentId === 'string' && data.studentId.trim()) {
     payload.studentId = data.studentId.trim()
   }
+  if (data.storeType === 'grocery' || data.storeType === 'restaurant') {
+    payload.storeType = data.storeType
+  }
+  if (typeof data.storeLocation === 'string' && data.storeLocation.trim()) {
+    payload.storeLocation = data.storeLocation.trim()
+  }
+  if (data.coords && typeof data.coords === 'object') {
+    payload.coords = data.coords
+  }
+  if (typeof data.deliveryRadiusKm === 'number') {
+    payload.deliveryRadiusKm = data.deliveryRadiusKm
+  }
 
   try {
     await setDoc(doc(db, 'users', uid), payload, { merge: true })

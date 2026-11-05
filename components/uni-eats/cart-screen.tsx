@@ -1,7 +1,9 @@
 'use client'
 
+import { useMemo } from 'react'
 import Image from 'next/image'
-import { campuses, formatPrice } from '@/lib/data'
+import { restaurants, formatPrice } from '@/lib/data'
+import { calculateDeliveryFeeAmount, formatDistanceKm } from '@/lib/location'
 import { useStore } from './store'
 import {
   ArrowLeftIcon,
@@ -14,10 +16,32 @@ import {
 const SERVICE_FEE = 0.99
 
 export function CartScreen() {
-  const { cart, updateQty, subtotal, goHome, goToScreen, campusId, customLocationLabel } = useStore()
-  const campus = campuses.find((c) => c.id === campusId) ?? campuses[0]
-  const locationDisplay = customLocationLabel || campus.name
-  const total = cart.length ? subtotal + SERVICE_FEE : 0
+  const {
+    cart,
+    updateQty,
+    subtotal,
+    goHome,
+    goToScreen,
+    userLocation,
+    getStoreDistanceKm,
+  } = useStore()
+
+  const orderRestaurant = useMemo(() => {
+    if (cart.length === 0) return null
+    return restaurants.find((r) => r.id === cart[0].restaurantId) || null
+  }, [cart])
+
+  const storeDistanceKm = useMemo(() => {
+    if (!orderRestaurant) return 1.5
+    return getStoreDistanceKm(orderRestaurant)
+  }, [orderRestaurant, getStoreDistanceKm])
+
+  const deliveryFee = useMemo(() => {
+    return calculateDeliveryFeeAmount(storeDistanceKm, orderRestaurant?.storeType === 'grocery')
+  }, [storeDistanceKm, orderRestaurant])
+
+  const locationDisplay = userLocation?.label || userLocation?.address || 'Your Location'
+  const total = cart.length ? subtotal + deliveryFee + SERVICE_FEE : 0
 
   return (
     <div className="flex min-h-full flex-col">
@@ -133,6 +157,10 @@ export function CartScreen() {
           <div className="mt-5 px-5">
             <div className="rounded-2xl bg-card p-4 shadow-sm ring-1 ring-border">
               <Row label="Subtotal" value={formatPrice(subtotal)} />
+              <Row
+                label={`Delivery fee (${formatDistanceKm(storeDistanceKm)})`}
+                value={formatPrice(deliveryFee)}
+              />
               <Row label="Service fee" value={formatPrice(SERVICE_FEE)} />
               <div className="my-3 h-px bg-border" />
               <Row label="Total" value={formatPrice(total)} strong />

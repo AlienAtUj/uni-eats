@@ -22,7 +22,18 @@ import {
   LogOutIcon,
 } from '@/components/icons'
 import { BottomSheet } from '@/components/uni-eats/sheet'
-import { formatPrice, campuses } from '@/lib/data'
+import { formatPrice, isGroceryCategory, type StoreType } from '@/lib/data'
+import { DEPARTMENTS } from '@/lib/grocery-catalog'
+import { MEAL_CATEGORIES } from '@/lib/meal-catalog'
+import {
+  type Coordinates,
+  type DeliveryLocation,
+  searchAddresses,
+  searchInstantLocations,
+  geocodeStoreAddress,
+  reverseGeocodeCoords,
+  SERVICE_DELIVERY_RADIUS_KM,
+} from '@/lib/location'
 import Image from 'next/image'
 import {
   useFirebaseProducts,
@@ -92,17 +103,24 @@ export default function StoreOwnerDashboard() {
 
   const [currentUser, setCurrentUser] = useState<User | null>(null)
   const [merchantId, setMerchantId] = useState<string | null>(null)
-  const [merchantName, setMerchantName] = useState<string>('Campus Store')
-  const [storeLocation, setStoreLocation] = useState<string>('Student Centre')
-  const [storeCampusId, setStoreCampusId] = useState<string>('aucklandpark')
-  const [storePickupTime, setStorePickupTime] = useState<string>('10-15 min')
+  const [merchantName, setMerchantName] = useState<string>('My Store')
+  const [storeType, setStoreType] = useState<StoreType>('restaurant')
+  const [storeLocation, setStoreLocation] = useState<string>('Set store address')
+  const [storeCoords, setStoreCoords] = useState<Coordinates | null>(null)
+  const [storePickupTime, setStorePickupTime] = useState<string>('15-25 min')
 
   const [newStoreName, setNewStoreName] = useState('')
+  const [newStoreType, setNewStoreType] = useState<StoreType>('restaurant')
   const [newStoreLocation, setNewStoreLocation] = useState('')
-  const [newStoreCampusId, setNewStoreCampusId] = useState('aucklandpark')
-  const [newStorePickupTime, setNewStorePickupTime] = useState('10-15 min')
+  const [newStoreCoords, setNewStoreCoords] = useState<Coordinates | null>(null)
+  const [newStorePickupTime, setNewStorePickupTime] = useState('15-25 min')
+  const [storeAddressQuery, setStoreAddressQuery] = useState('')
+  const [storeAddressResults, setStoreAddressResults] = useState<DeliveryLocation[]>([])
+  const [isSearchingStoreAddress, setIsSearchingStoreAddress] = useState(false)
+  const [isLocatingStoreGps, setIsLocatingStoreGps] = useState(false)
   const [isSavingStore, setIsSavingStore] = useState(false)
   const [savedStoreSuccess, setSavedStoreSuccess] = useState(false)
+  const [uploadDefaultStoreType, setUploadDefaultStoreType] = useState<StoreType | null>(null)
 
   const [isCheckingAccess, setIsCheckingAccess] = useState(true)
   const [orders, setOrders] = useState<Order[]>([])
@@ -146,10 +164,11 @@ export default function StoreOwnerDashboard() {
       setMerchantId(user.uid)
 
       try {
-        let currentName = 'Campus Store'
-        let loc = 'Student Centre'
-        let campus = 'aucklandpark'
-        let pickup = '10-15 min'
+        let currentName = 'My Store'
+        let loc = 'Johannesburg'
+        let pickup = '15-25 min'
+        let resolvedType: StoreType = 'restaurant'
+        let coords: Coordinates | null = null
 
         const [userDoc, restDoc] = await Promise.all([
           getDoc(doc(db, 'users', user.uid)),
@@ -159,27 +178,40 @@ export default function StoreOwnerDashboard() {
         if (userDoc.exists()) {
           const data = userDoc.data()
           currentName =
-            data.storeName || data.businessName || data.name || 'Campus Store'
+            data.storeName || data.businessName || data.name || 'My Store'
           if (data.storeLocation || data.location)
             loc = data.storeLocation || data.location
-          if (data.campusId) campus = data.campusId
+          if (data.storeType === 'grocery' || data.storeType === 'restaurant') {
+            resolvedType = data.storeType
+          }
+          if (data.coords && Number.isFinite(data.coords.lat) && Number.isFinite(data.coords.lng)) {
+            coords = data.coords
+          }
         }
 
         if (restDoc.exists()) {
           const rData = restDoc.data()
           if (rData.name) currentName = rData.name
           if (rData.location) loc = rData.location
-          if (rData.campusIds && rData.campusIds.length > 0)
-            campus = rData.campusIds[0]
           if (rData.pickupTime) pickup = rData.pickupTime
+          if (rData.storeType === 'grocery' || rData.storeType === 'restaurant') {
+            resolvedType = rData.storeType
+          } else if (isGroceryCategory(rData.cuisine) || isGroceryCategory(rData.name)) {
+            resolvedType = 'grocery'
+          }
+          if (rData.coords && Number.isFinite(rData.coords.lat) && Number.isFinite(rData.coords.lng)) {
+            coords = rData.coords
+          }
         }
 
         setMerchantName(currentName)
         setNewStoreName(currentName)
+        setStoreType(resolvedType)
+        setNewStoreType(resolvedType)
         setStoreLocation(loc)
         setNewStoreLocation(loc)
-        setStoreCampusId(campus)
-        setNewStoreCampusId(campus)
+        setStoreCoords(coords)
+        setNewStoreCoords(coords)
         setStorePickupTime(pickup)
         setNewStorePickupTime(pickup)
       } catch (error) {
@@ -203,6 +235,86 @@ export default function StoreOwnerDashboard() {
     }
   }, [router])
 
+  // Super-fast store address search: 0ms instant fuzzy match + 120ms multi-API geocoder
+  useEffect(() => {
+    const q = storeAddressQuery.trim()
+    if (q.length < 1) {
+      setStoreAddressResults([])
+      setIsSearchingStoreAddress(false)
+      return
+    }
+    const instant = searchInstantLocations(q)
+    setStoreAddressResults(instant)
+    if (q.length < 2) {
+      setIsSearchingStoreAddress(false)
+      return
+    }
+    const controller = new AbortController()
+    setIsSearchingStoreAddress(true)
+    const timer = setTimeout(async () => {
+      try {
+        const res = await searchAddresses(q, controller.signal)
+        if (!controller.signal.aborted) {
+          setStoreAddressResults(res)
+        }
+      } catch {
+        if (!controller.signal.aborted) {
+          setStoreAddressResults(instant)
+        }
+      } finally {
+        if (!controller.signal.aborted) {
+          setIsSearchingStoreAddress(false)
+        }
+      }
+    }, 120)
+    return () => {
+      clearTimeout(timer)
+      controller.abort()
+    }
+  }, [storeAddressQuery])
+
+  const handleUseStoreGpsLocation = () => {
+    if (typeof window === 'undefined' || !('geolocation' in navigator)) {
+      alert('GPS location is not supported in this browser.')
+      return
+    }
+    setIsLocatingStoreGps(true)
+    navigator.geolocation.getCurrentPosition(
+      async (pos) => {
+        try {
+          const resolved = await reverseGeocodeCoords(pos.coords.latitude, pos.coords.longitude)
+          setNewStoreLocation(resolved.label)
+          setNewStoreCoords(resolved.coords)
+          setStoreAddressQuery('')
+          setStoreAddressResults([])
+        } catch {
+          alert('Could not resolve address from GPS.')
+        } finally {
+          setIsLocatingStoreGps(false)
+        }
+      },
+      () => {
+        setIsLocatingStoreGps(false)
+        alert('Location permission denied. Please search your street address.')
+      },
+      { enableHighAccuracy: true, timeout: 10000 }
+    )
+  }
+
+  const handleQuickSwitchStoreType = async (nextType: StoreType) => {
+    setStoreType(nextType)
+    setNewStoreType(nextType)
+    if (!merchantId) return
+    try {
+      await Promise.all([
+        setDoc(doc(db, 'users', merchantId), { storeType: nextType }, { merge: true }),
+        setDoc(doc(db, 'restaurants', merchantId), { storeType: nextType }, { merge: true }),
+      ])
+    } catch (e) {
+      console.warn('Could not persist storeType switch:', e)
+    }
+  }
+
   const handleStatusUpdate = async (orderId: string, newStatus: OrderStatus) => {
     try {
       await updateOrderStatus(orderId, newStatus)
@@ -219,6 +331,10 @@ export default function StoreOwnerDashboard() {
     }
 
     try {
+      if (newProductData.storeType && newProductData.storeType !== storeType) {
+        setStoreType(newProductData.storeType)
+        setNewStoreType(newProductData.storeType)
+      }
       if (editingProduct) {
         await updateProduct(
           editingProduct.id,
@@ -232,6 +348,7 @@ export default function StoreOwnerDashboard() {
       mutate()
       setIsModalOpen(false)
       setEditingProduct(null)
+      setUploadDefaultStoreType(null)
     } catch (e) {
       console.error(e)
       alert(
@@ -326,39 +443,43 @@ export default function StoreOwnerDashboard() {
     setSavedStoreSuccess(false)
     try {
       const cleanName = newStoreName.trim()
-      const cleanLoc = newStoreLocation.trim() || 'Student Centre'
-      const cleanPickup = newStorePickupTime.trim() || '10-15 min'
-      const campusIds =
-        newStoreCampusId === 'all'
-          ? ['aucklandpark', 'buntingroad', 'doornfontein', 'soweto']
-          : [newStoreCampusId]
+      const cleanLoc = newStoreLocation.trim() || 'Johannesburg'
+      const cleanPickup = newStorePickupTime.trim() || '15-25 min'
+
+      let resolvedCoords = newStoreCoords
+      if (!resolvedCoords && cleanLoc) {
+        resolvedCoords = await geocodeStoreAddress(cleanLoc)
+      }
+
+      const userPayload: Record<string, any> = {
+        name: cleanName,
+        storeName: cleanName,
+        storeLocation: cleanLoc,
+        storeType: newStoreType,
+        deliveryRadiusKm: SERVICE_DELIVERY_RADIUS_KM,
+      }
+      const restPayload: Record<string, any> = {
+        name: cleanName,
+        location: cleanLoc,
+        pickupTime: cleanPickup,
+        storeType: newStoreType,
+        deliveryRadiusKm: SERVICE_DELIVERY_RADIUS_KM,
+      }
+      if (resolvedCoords) {
+        userPayload.coords = resolvedCoords
+        restPayload.coords = resolvedCoords
+        setNewStoreCoords(resolvedCoords)
+      }
 
       await Promise.all([
-        setDoc(
-          doc(db, 'users', merchantId),
-          {
-            name: cleanName,
-            storeName: cleanName,
-            storeLocation: cleanLoc,
-            campusId: newStoreCampusId,
-          },
-          { merge: true },
-        ),
-        setDoc(
-          doc(db, 'restaurants', merchantId),
-          {
-            name: cleanName,
-            location: cleanLoc,
-            campusIds: campusIds,
-            pickupTime: cleanPickup,
-          },
-          { merge: true },
-        ),
+        setDoc(doc(db, 'users', merchantId), userPayload, { merge: true }),
+        setDoc(doc(db, 'restaurants', merchantId), restPayload, { merge: true }),
       ])
 
       setMerchantName(cleanName)
+      setStoreType(newStoreType)
       setStoreLocation(cleanLoc)
-      setStoreCampusId(newStoreCampusId)
+      setStoreCoords(newStoreCoords)
       setStorePickupTime(cleanPickup)
       setSavedStoreSuccess(true)
       setTimeout(() => setSavedStoreSuccess(false), 2500)
@@ -398,8 +519,8 @@ export default function StoreOwnerDashboard() {
     .filter((o) => o.status === 'completed' || o.paymentStatus === 'paid')
     .reduce((sum, o) => sum + (Number(o.total) || 0), 0)
 
-  const campusObj = campuses.find((c) => c.id === storeCampusId)
-  const campusShort = campusObj ? campusObj.short : 'All Campuses'
+  const storeTypeLabel =
+    storeType === 'grocery' ? 'Shop / Grocery Owner' : 'Restaurant Owner'
 
   return (
     <div className="flex h-dvh justify-center bg-[oklch(0.16_0.03_150)] md:h-auto md:min-h-dvh md:py-8">
@@ -427,7 +548,7 @@ export default function StoreOwnerDashboard() {
                     </span>
                     <div className="min-w-0">
                       <p className="text-[11px] font-medium text-[oklch(0.97_0.02_120)]/70">
-                        Dash Partner Portal
+                        Dash Partner Portal · {storeTypeLabel}
                       </p>
                       <p className="truncate text-sm font-extrabold tracking-tight">
                         {merchantName}
@@ -444,7 +565,7 @@ export default function StoreOwnerDashboard() {
                   </button>
                 </div>
 
-                {/* Location Pill */}
+                {/* Location & Store Type Pill */}
                 <button
                   type="button"
                   onClick={() => setActiveTab('store')}
@@ -452,7 +573,7 @@ export default function StoreOwnerDashboard() {
                 >
                   <PinIcon className="h-3.5 w-3.5 text-accent" />
                   <span className="truncate">
-                    {storeLocation} · {campusShort} · {storePickupTime}
+                    {storeLocation} · {storePickupTime}
                   </span>
                   <ChevronDownIcon className="h-3.5 w-3.5 opacity-80" />
                 </button>
@@ -783,26 +904,70 @@ export default function StoreOwnerDashboard() {
 
               {/* TAB 2: MENU / PRODUCTS */}
               {activeTab === 'products' && (
-                <div className="mt-5 px-5">
-                  <div className="mb-3 flex items-center justify-between">
+                <div className="mt-4 px-5">
+                  {/* Business Mode Switcher: Upload as Restaurant Owner vs Shop Owner */}
+                  <div className="mb-4 rounded-3xl bg-card p-3.5 shadow-sm ring-1 ring-border">
+                    <div className="mb-2 flex items-center justify-between">
+                      <span className="text-[11px] font-bold uppercase tracking-wider text-muted-foreground">
+                        Operating & Uploading Mode
+                      </span>
+                      <span className="rounded-full bg-primary/10 px-2.5 py-0.5 text-[10px] font-extrabold text-primary">
+                        {storeType === 'grocery' ? 'Shop (Stores)' : 'Eat (Meals)'}
+                      </span>
+                    </div>
+                    <div className="grid grid-cols-2 gap-2 rounded-2xl bg-secondary p-1">
+                      <button
+                        type="button"
+                        onClick={() => handleQuickSwitchStoreType('restaurant')}
+                        className={cn(
+                          'flex items-center justify-center gap-1.5 rounded-xl py-2.5 text-xs font-bold transition-all',
+                          storeType === 'restaurant'
+                            ? 'bg-primary text-primary-foreground shadow-sm'
+                            : 'text-muted-foreground hover:text-foreground',
+                        )}
+                      >
+                        <StoreIcon className="h-3.5 w-3.5" />
+                        <span>Restaurant Owner</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleQuickSwitchStoreType('grocery')}
+                        className={cn(
+                          'flex items-center justify-center gap-1.5 rounded-xl py-2.5 text-xs font-bold transition-all',
+                          storeType === 'grocery'
+                            ? 'bg-primary text-primary-foreground shadow-sm'
+                            : 'text-muted-foreground hover:text-foreground',
+                        )}
+                      >
+                        <BagIcon className="h-3.5 w-3.5" />
+                        <span>Shop / Grocery Owner</span>
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="mb-3 flex items-center justify-between gap-2">
                     <div>
                       <h2 className="text-lg font-extrabold tracking-tight text-foreground">
-                        Menu Catalog
+                        {storeType === 'grocery' ? 'Shop Inventory' : 'Menu Catalog'}
                       </h2>
                       <p className="text-xs text-muted-foreground">
-                        {allProducts.length} item{allProducts.length === 1 ? '' : 's'} live on campus
+                        {allProducts.length} item{allProducts.length === 1 ? '' : 's'} live in your{' '}
+                        {storeType === 'grocery' ? 'shop' : 'restaurant'}
                       </p>
                     </div>
                     <button
                       type="button"
                       onClick={() => {
                         setEditingProduct(null)
+                        setUploadDefaultStoreType(storeType)
                         setIsModalOpen(true)
                       }}
                       className="inline-flex items-center gap-1.5 rounded-full bg-primary px-4 py-2 text-xs font-bold text-primary-foreground shadow-sm transition-transform active:scale-95"
                     >
                       <PlusIcon className="h-4 w-4" />
-                      <span>Add Item</span>
+                      <span>
+                        {storeType === 'grocery' ? 'Add Shop Product' : 'Add Meal'}
+                      </span>
                     </button>
                   </div>
 
@@ -812,6 +977,8 @@ export default function StoreOwnerDashboard() {
                         const modCount = Array.isArray(p.modifierGroups)
                           ? p.modifierGroups.length
                           : 0
+                        const isGroceryItem =
+                          p.storeType === 'grocery' || isGroceryCategory(p.category)
 
                         return (
                           <div
@@ -820,10 +987,25 @@ export default function StoreOwnerDashboard() {
                           >
                             <div className="flex gap-3.5">
                               <div className="flex min-w-0 flex-1 flex-col">
-                                <div className="flex items-center gap-1.5">
+                                <div className="flex flex-wrap items-center gap-1.5">
+                                  <span
+                                    className={cn(
+                                      'rounded-full px-2 py-0.5 text-[10px] font-bold',
+                                      isGroceryItem
+                                        ? 'bg-emerald-500/15 text-emerald-700'
+                                        : 'bg-accent/20 text-accent-foreground',
+                                    )}
+                                  >
+                                    {isGroceryItem ? 'Shop' : 'Restaurant'}
+                                  </span>
                                   <span className="rounded-full bg-secondary px-2 py-0.5 text-[10px] font-bold text-muted-foreground">
                                     {p.category || 'Menu'}
                                   </span>
+                                  {p.size && (
+                                    <span className="rounded-full bg-secondary px-2 py-0.5 text-[10px] font-semibold text-foreground">
+                                      {p.size}
+                                    </span>
+                                  )}
                                   {modCount > 0 && (
                                     <span className="rounded-full bg-primary/10 px-2 py-0.5 text-[10px] font-bold text-primary">
                                       +{modCount} option{modCount === 1 ? '' : 's'}
@@ -841,9 +1023,16 @@ export default function StoreOwnerDashboard() {
                                   </p>
                                 )}
 
-                                <p className="mt-auto pt-2 text-sm font-extrabold text-primary">
-                                  {formatPrice(p.price)}
-                                </p>
+                                <div className="mt-auto flex items-baseline gap-2 pt-2">
+                                  <span className="text-sm font-extrabold text-primary">
+                                    {formatPrice(p.price)}
+                                  </span>
+                                  {p.oldPrice && Number(p.oldPrice) > Number(p.price) && (
+                                    <span className="text-xs font-semibold text-muted-foreground line-through">
+                                      {formatPrice(Number(p.oldPrice))}
+                                    </span>
+                                  )}
+                                </div>
                               </div>
 
                               <div className="relative h-24 w-24 shrink-0 overflow-hidden rounded-2xl bg-secondary ring-1 ring-border">
@@ -940,22 +1129,37 @@ export default function StoreOwnerDashboard() {
                           <PackageIcon className="h-7 w-7" />
                         </span>
                         <p className="mt-3 text-base font-bold text-foreground">
-                          Your menu is empty
+                          Your {storeType === 'grocery' ? 'shop catalog' : 'menu'} is empty
                         </p>
                         <p className="mx-auto mt-1 max-w-xs text-xs text-muted-foreground">
-                          Add your meals with photos and prices so students can start ordering.
+                          Upload as a Restaurant Owner (meals) or Shop Owner (groceries & essentials) so nearby customers can order.
                         </p>
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setEditingProduct(null)
-                            setIsModalOpen(true)
-                          }}
-                          className="mt-4 inline-flex items-center gap-1.5 rounded-full bg-primary px-5 py-2.5 text-xs font-bold text-primary-foreground shadow-sm"
-                        >
-                          <PlusIcon className="h-4 w-4" />
-                          <span>Add First Item</span>
-                        </button>
+                        <div className="mt-4 flex flex-wrap items-center justify-center gap-2">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setEditingProduct(null)
+                              setUploadDefaultStoreType('restaurant')
+                              setIsModalOpen(true)
+                            }}
+                            className="inline-flex items-center gap-1.5 rounded-full bg-primary px-4 py-2.5 text-xs font-bold text-primary-foreground shadow-sm"
+                          >
+                            <PlusIcon className="h-4 w-4" />
+                            <span>Upload Restaurant Meal</span>
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setEditingProduct(null)
+                              setUploadDefaultStoreType('grocery')
+                              setIsModalOpen(true)
+                            }}
+                            className="inline-flex items-center gap-1.5 rounded-full bg-secondary px-4 py-2.5 text-xs font-bold text-foreground ring-1 ring-border"
+                          >
+                            <PlusIcon className="h-4 w-4" />
+                            <span>Upload Shop Product</span>
+                          </button>
+                        </div>
                       </div>
                     )}
                   </div>
@@ -969,56 +1173,152 @@ export default function StoreOwnerDashboard() {
                     Store Settings
                   </h2>
                   <p className="mt-0.5 text-xs text-muted-foreground">
-                    Configure how students see and find {merchantName} on campus.
+                    Configure your business type and real-time GPS address so nearby customers see your store first.
                   </p>
 
                   <form
                     onSubmit={handleSaveStoreSettings}
                     className="mt-4 flex flex-col gap-4 rounded-3xl bg-card p-5 shadow-sm ring-1 ring-border"
                   >
+                    {/* Business Type Selector */}
                     <div className="flex flex-col gap-1.5">
                       <label className="text-xs font-bold text-foreground">
-                        Store / Business Name
+                        Business Type
+                      </label>
+                      <div className="grid grid-cols-2 gap-2.5">
+                        <button
+                          type="button"
+                          onClick={() => setNewStoreType('restaurant')}
+                          className={cn(
+                            'flex flex-col items-start gap-1 rounded-2xl border p-3.5 text-left transition-all',
+                            newStoreType === 'restaurant'
+                              ? 'border-primary bg-primary/10 ring-1 ring-primary'
+                              : 'border-border bg-background hover:bg-secondary/50',
+                          )}
+                        >
+                          <StoreIcon className="h-5 w-5 text-primary" />
+                          <span className="text-xs font-extrabold text-foreground">
+                            Restaurant Owner
+                          </span>
+                          <span className="text-[11px] text-muted-foreground">
+                            Meals, Burgers, Kotas & Takeaways
+                          </span>
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={() => setNewStoreType('grocery')}
+                          className={cn(
+                            'flex flex-col items-start gap-1 rounded-2xl border p-3.5 text-left transition-all',
+                            newStoreType === 'grocery'
+                              ? 'border-primary bg-primary/10 ring-1 ring-primary'
+                              : 'border-border bg-background hover:bg-secondary/50',
+                          )}
+                        >
+                          <BagIcon className="h-5 w-5 text-primary" />
+                          <span className="text-xs font-extrabold text-foreground">
+                            Shop / Grocery Owner
+                          </span>
+                          <span className="text-[11px] text-muted-foreground">
+                            Groceries, Spaza, Butcher & Produce
+                          </span>
+                        </button>
+                      </div>
+                    </div>
+
+                    <div className="flex flex-col gap-1.5">
+                      <label className="text-xs font-bold text-foreground">
+                        {newStoreType === 'grocery'
+                          ? 'Shop / Supermarket Name'
+                          : 'Restaurant Name'}
                       </label>
                       <input
                         type="text"
                         required
                         value={newStoreName}
                         onChange={(e) => setNewStoreName(e.target.value)}
-                        placeholder="e.g. Campus Grill"
+                        placeholder={
+                          newStoreType === 'grocery'
+                            ? 'e.g. Doornfontein Spaza & Fresh Mart'
+                            : 'e.g. SML Restaurant & Grill'
+                        }
                         className="w-full rounded-2xl border bg-background px-4 py-3 text-sm outline-none focus:border-primary focus:ring-1 focus:ring-primary"
                       />
                     </div>
 
+                    {/* Real-Time Store Street Address & GPS Coordinates */}
                     <div className="flex flex-col gap-1.5">
                       <label className="text-xs font-bold text-foreground">
-                        Campus
-                      </label>
-                      <select
-                        value={newStoreCampusId}
-                        onChange={(e) => setNewStoreCampusId(e.target.value)}
-                        className="w-full rounded-2xl border bg-background px-4 py-3 text-sm outline-none focus:border-primary focus:ring-1 focus:ring-primary"
-                      >
-                        <option value="all">All Campuses</option>
-                        {campuses.map((c) => (
-                          <option key={c.id} value={c.id}>
-                            {c.name} ({c.short})
-                          </option>
-                        ))}
-                      </select>
-                    </div>
-
-                    <div className="flex flex-col gap-1.5">
-                      <label className="text-xs font-bold text-foreground">
-                        Specific Pickup Spot
+                        Store Street Address & GPS Location
                       </label>
                       <input
                         type="text"
                         value={newStoreLocation}
-                        onChange={(e) => setNewStoreLocation(e.target.value)}
-                        placeholder="e.g. Student Centre, Shop 4"
+                        onChange={(e) => {
+                          setNewStoreLocation(e.target.value)
+                          setStoreAddressQuery(e.target.value)
+                        }}
+                        placeholder="Search your store street address or suburb..."
                         className="w-full rounded-2xl border bg-background px-4 py-3 text-sm outline-none focus:border-primary focus:ring-1 focus:ring-primary"
                       />
+
+                      {storeAddressQuery.trim().length >= 1 && (
+                        <div className="mt-1 flex max-h-48 flex-col overflow-y-auto rounded-2xl border border-border bg-background p-1 shadow-md">
+                          {isSearchingStoreAddress && storeAddressResults.length === 0 ? (
+                            <p className="py-3 text-center text-xs text-muted-foreground">
+                              Searching addresses...
+                            </p>
+                          ) : storeAddressResults.length === 0 ? (
+                            <p className="py-3 text-center text-xs text-muted-foreground">
+                              No matching address found.
+                            </p>
+                          ) : (
+                            storeAddressResults.map((loc, idx) => (
+                              <button
+                                key={`${loc.label}-${idx}`}
+                                type="button"
+                                onClick={() => {
+                                  setNewStoreLocation(loc.label)
+                                  setNewStoreCoords(loc.coords)
+                                  setStoreAddressQuery('')
+                                  setStoreAddressResults([])
+                                }}
+                                className="flex w-full items-start gap-2 rounded-xl p-2.5 text-left hover:bg-secondary"
+                              >
+                                <PinIcon className="mt-0.5 h-4 w-4 shrink-0 text-primary" />
+                                <div className="min-w-0 flex-1">
+                                  <span className="block truncate text-xs font-bold text-foreground">
+                                    {loc.label}
+                                  </span>
+                                  <span className="block truncate text-[11px] text-muted-foreground">
+                                    {loc.address}
+                                  </span>
+                                </div>
+                              </button>
+                            ))
+                          )}
+                        </div>
+                      )}
+
+                      <button
+                        type="button"
+                        onClick={handleUseStoreGpsLocation}
+                        disabled={isLocatingStoreGps}
+                        className="mt-1 inline-flex items-center justify-center gap-2 rounded-2xl bg-primary/10 px-3.5 py-2.5 text-xs font-bold text-primary transition-colors hover:bg-primary/15"
+                      >
+                        <PinIcon className="h-3.5 w-3.5" />
+                        <span>
+                          {isLocatingStoreGps
+                            ? 'Detecting store GPS...'
+                            : 'Use my current GPS location for store'}
+                        </span>
+                      </button>
+
+                      {newStoreCoords && (
+                        <p className="text-[11px] font-semibold text-primary">
+                          GPS pinned ({newStoreCoords.lat.toFixed(4)}, {newStoreCoords.lng.toFixed(4)}) · Customers within {SERVICE_DELIVERY_RADIUS_KM} km will see your store prioritized by distance.
+                        </p>
+                      )}
                     </div>
 
                     <div className="flex flex-col gap-1.5">
@@ -1029,7 +1329,7 @@ export default function StoreOwnerDashboard() {
                         type="text"
                         value={newStorePickupTime}
                         onChange={(e) => setNewStorePickupTime(e.target.value)}
-                        placeholder="e.g. 10-15 min"
+                        placeholder="e.g. 15-25 min"
                         className="w-full rounded-2xl border bg-background px-4 py-3 text-sm outline-none focus:border-primary focus:ring-1 focus:ring-primary"
                       />
                     </div>
@@ -1069,7 +1369,7 @@ export default function StoreOwnerDashboard() {
                     </p>
                     <span className="mt-2.5 inline-flex items-center gap-1.5 rounded-full bg-primary/10 px-3 py-1 text-xs font-bold text-primary">
                       <StoreIcon className="h-3.5 w-3.5" />
-                      <span>Verified Store Owner</span>
+                      <span>Verified {storeTypeLabel}</span>
                     </span>
                   </div>
 
@@ -1084,10 +1384,10 @@ export default function StoreOwnerDashboard() {
                       </span>
                       <div className="min-w-0 flex-1">
                         <span className="block text-sm font-bold text-foreground">
-                          Store Location & Pickup
+                          Store Type & GPS Address
                         </span>
                         <span className="block truncate text-xs text-muted-foreground">
-                          {storeLocation} · {campusShort}
+                          {storeTypeLabel} · {storeLocation}
                         </span>
                       </div>
                     </button>
@@ -1206,9 +1506,11 @@ export default function StoreOwnerDashboard() {
             <AddProductSheet
               open={isModalOpen}
               initialProduct={editingProduct}
+              defaultStoreType={uploadDefaultStoreType || storeType}
               onClose={() => {
                 setIsModalOpen(false)
                 setEditingProduct(null)
+                setUploadDefaultStoreType(null)
               }}
               onSave={handleProductSaved}
             />
@@ -1228,41 +1530,41 @@ type ModifierGroup = {
   options: ModifierOption[]
 }
 
-const PRODUCT_CATEGORY_OPTIONS = [
+const RESTAURANT_CATEGORY_OPTIONS = [
   'Burgers',
-  'Kotas',
+  'Kotas & Chips',
   'Chicken',
   'Pizza',
+  'Bowls & Salads',
+  'Wraps & Drinks',
   'Shisa Nyama',
-  'Vetkoek',
-  'Bowls',
-  'Wraps',
   'Breakfast',
-  'Drinks',
-  'Salads',
   'Desserts',
-  'Bread & Milk',
-  'Fresh Produce',
-  'Butcher',
-  'Snacks & Drinks',
-  'Groceries',
 ]
+
+const GROCERY_CATEGORY_OPTIONS = DEPARTMENTS.map((d) => d.title)
 
 function AddProductSheet({
   open,
   initialProduct,
+  defaultStoreType,
   onClose,
   onSave,
 }: {
   open: boolean
   initialProduct?: any
+  defaultStoreType: StoreType
   onClose: () => void
   onSave: (data: any, files: File[]) => Promise<void>
 }) {
+  const [uploadStoreType, setUploadStoreType] = useState<StoreType>(defaultStoreType)
   const [name, setName] = useState('')
   const [description, setDescription] = useState('')
   const [price, setPrice] = useState('')
+  const [oldPrice, setOldPrice] = useState('')
+  const [size, setSize] = useState('')
   const [category, setCategory] = useState('Burgers')
+  const [subcategory, setSubcategory] = useState('')
   const [isCustomCategory, setIsCustomCategory] = useState(false)
   const [customCategoryInput, setCustomCategoryInput] = useState('')
   const [isSubmitting, setIsSubmitting] = useState(false)
@@ -1271,15 +1573,55 @@ function AddProductSheet({
   const [imagePreviews, setImagePreviews] = useState<string[]>([])
   const [modifierGroups, setModifierGroups] = useState<ModifierGroup[]>([])
 
+  const activeCategoryOptions =
+    uploadStoreType === 'grocery'
+      ? GROCERY_CATEGORY_OPTIONS
+      : RESTAURANT_CATEGORY_OPTIONS
+
+  const activeSubcategoryOptions = useMemo(() => {
+    if (uploadStoreType === 'grocery') {
+      const dept = DEPARTMENTS.find(
+        (d) => d.title.toLowerCase() === category.toLowerCase(),
+      )
+      return dept ? dept.subcategories : []
+    }
+    const mealCat = MEAL_CATEGORIES.find(
+      (c) => c.title.toLowerCase() === category.toLowerCase(),
+    )
+    return mealCat ? mealCat.subcategories : []
+  }, [uploadStoreType, category])
+
   useEffect(() => {
     if (!open) return
+    const inferredType: StoreType = initialProduct
+      ? initialProduct.storeType === 'grocery' ||
+        isGroceryCategory(initialProduct.category)
+        ? 'grocery'
+        : 'restaurant'
+      : defaultStoreType
+
+    setUploadStoreType(inferredType)
     setName(initialProduct?.name || '')
     setDescription(initialProduct?.description || '')
     setPrice(initialProduct ? initialProduct.price.toString() : '')
-    const initialCat = initialProduct?.category?.trim() || 'Burgers'
+    setOldPrice(
+      initialProduct?.oldPrice && Number(initialProduct.oldPrice) > 0
+        ? initialProduct.oldPrice.toString()
+        : '',
+    )
+    setSize(initialProduct?.size || '')
+    setSubcategory(initialProduct?.subcategory || '')
+
+    const optionsForType =
+      inferredType === 'grocery'
+        ? GROCERY_CATEGORY_OPTIONS
+        : RESTAURANT_CATEGORY_OPTIONS
+    const fallbackCat = optionsForType[0]
+    const initialCat = initialProduct?.category?.trim() || fallbackCat
     const custom = initialProduct?.category
-      ? !PRODUCT_CATEGORY_OPTIONS.includes(initialCat)
+      ? !optionsForType.includes(initialCat)
       : false
+
     setCategory(initialCat)
     setIsCustomCategory(custom)
     setCustomCategoryInput(custom ? initialCat : '')
@@ -1287,7 +1629,20 @@ function AddProductSheet({
     setImageFiles([])
     setImagePreviews([])
     setModifierGroups(initialProduct?.modifierGroups || [])
-  }, [open, initialProduct])
+  }, [open, initialProduct, defaultStoreType])
+
+  const handleSwitchUploadType = (nextType: StoreType) => {
+    setUploadStoreType(nextType)
+    setIsCustomCategory(false)
+    setCustomCategoryInput('')
+    if (nextType === 'grocery') {
+      setCategory(GROCERY_CATEGORY_OPTIONS[0])
+      setSubcategory(DEPARTMENTS[0]?.subcategories[0] || '')
+    } else {
+      setCategory(RESTAURANT_CATEGORY_OPTIONS[0])
+      setSubcategory(MEAL_CATEGORIES[0]?.subcategories[0] || '')
+    }
+  }
 
   const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files) {
@@ -1384,12 +1739,20 @@ function AddProductSheet({
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     setIsSubmitting(true)
+    const parsedOldPrice = parseFloat(oldPrice)
     await onSave(
       {
         name,
         description,
         price: parseFloat(price) || 0,
+        oldPrice:
+          Number.isFinite(parsedOldPrice) && parsedOldPrice > (parseFloat(price) || 0)
+            ? parsedOldPrice
+            : undefined,
+        size: size.trim() || undefined,
         category,
+        subcategory: subcategory.trim() || undefined,
+        storeType: uploadStoreType,
         modifierGroups,
         images: existingImages,
       },
@@ -1402,7 +1765,15 @@ function AddProductSheet({
     <BottomSheet
       open={open}
       onClose={onClose}
-      title={initialProduct ? 'Edit Menu Item' : 'Add Menu Item'}
+      title={
+        initialProduct
+          ? uploadStoreType === 'grocery'
+            ? 'Edit Shop Product'
+            : 'Edit Restaurant Meal'
+          : uploadStoreType === 'grocery'
+            ? 'Upload Shop Product'
+            : 'Upload Restaurant Meal'
+      }
       footer={
         <div className="flex items-center gap-2.5">
           <button
@@ -1423,7 +1794,9 @@ function AddProductSheet({
               ? 'Saving...'
               : initialProduct
                 ? 'Save Changes'
-                : 'Create Item'}
+                : uploadStoreType === 'grocery'
+                  ? 'Upload Shop Product'
+                  : 'Upload Restaurant Meal'}
           </button>
         </div>
       }
@@ -1433,6 +1806,46 @@ function AddProductSheet({
         onSubmit={handleSubmit}
         className="flex flex-col gap-4 py-2"
       >
+        {/* Upload Mode Switcher: Upload as Restaurant Owner vs Shop Owner */}
+        <div className="flex flex-col gap-1.5">
+          <label className="text-xs font-bold text-foreground">
+            Upload As
+          </label>
+          <div className="grid grid-cols-2 gap-2 rounded-2xl bg-secondary p-1">
+            <button
+              type="button"
+              onClick={() => handleSwitchUploadType('restaurant')}
+              className={cn(
+                'flex items-center justify-center gap-1.5 rounded-xl py-2.5 text-xs font-bold transition-all',
+                uploadStoreType === 'restaurant'
+                  ? 'bg-primary text-primary-foreground shadow-sm'
+                  : 'text-muted-foreground hover:text-foreground',
+              )}
+            >
+              <StoreIcon className="h-3.5 w-3.5" />
+              <span>Restaurant Owner</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => handleSwitchUploadType('grocery')}
+              className={cn(
+                'flex items-center justify-center gap-1.5 rounded-xl py-2.5 text-xs font-bold transition-all',
+                uploadStoreType === 'grocery'
+                  ? 'bg-primary text-primary-foreground shadow-sm'
+                  : 'text-muted-foreground hover:text-foreground',
+              )}
+            >
+              <BagIcon className="h-3.5 w-3.5" />
+              <span>Shop Owner</span>
+            </button>
+          </div>
+          <p className="text-[11px] text-muted-foreground">
+            {uploadStoreType === 'grocery'
+              ? 'Appears in Shop (Stores) departments & local grocery delivery.'
+              : 'Appears in Eat (Meals) restaurant menus & meal categories.'}
+          </p>
+        </div>
+
         {/* Product Photos */}
         <div>
           <label className="mb-1.5 block text-xs font-bold text-foreground">
@@ -1501,13 +1914,17 @@ function AddProductSheet({
         <div className="grid grid-cols-3 gap-2.5">
           <div className="col-span-2 flex flex-col gap-1">
             <label className="text-xs font-bold text-foreground">
-              Item Name
+              {uploadStoreType === 'grocery' ? 'Product Name' : 'Meal Name'}
             </label>
             <input
               required
               value={name}
               onChange={(e) => setName(e.target.value)}
-              placeholder="e.g. Chicken Burger"
+              placeholder={
+                uploadStoreType === 'grocery'
+                  ? 'e.g. Full Cream Fresh Milk'
+                  : 'e.g. Chicken Burger & Chips'
+              }
               className="rounded-2xl border bg-background px-3.5 py-2.5 text-sm outline-none focus:border-primary"
             />
           </div>
@@ -1522,17 +1939,54 @@ function AddProductSheet({
               step="any"
               value={price}
               onChange={(e) => setPrice(e.target.value)}
-              placeholder="59.95"
+              placeholder={uploadStoreType === 'grocery' ? '34.99' : '59.95'}
               className="rounded-2xl border bg-background px-3 py-2.5 text-sm outline-none focus:border-primary"
             />
           </div>
         </div>
 
-        {/* Category Pills */}
+        {/* Pack Size / Weight & Optional Special Old Price */}
+        <div className="grid grid-cols-2 gap-2.5">
+          <div className="flex flex-col gap-1">
+            <label className="text-xs font-bold text-foreground">
+              {uploadStoreType === 'grocery'
+                ? 'Pack Size / Weight'
+                : 'Portion / Combo Label'}
+            </label>
+            <input
+              value={size}
+              onChange={(e) => setSize(e.target.value)}
+              placeholder={
+                uploadStoreType === 'grocery'
+                  ? 'e.g. 2L, 700g, 6 Pack'
+                  : 'e.g. Combo Meal, Quarter Loaf'
+              }
+              className="rounded-2xl border bg-background px-3.5 py-2.5 text-sm outline-none focus:border-primary"
+            />
+          </div>
+          <div className="flex flex-col gap-1">
+            <label className="text-xs font-bold text-foreground">
+              Was Price (Optional Special)
+            </label>
+            <input
+              type="number"
+              min="0"
+              step="any"
+              value={oldPrice}
+              onChange={(e) => setOldPrice(e.target.value)}
+              placeholder="e.g. 39.99"
+              className="rounded-2xl border bg-background px-3.5 py-2.5 text-sm outline-none focus:border-primary"
+            />
+          </div>
+        </div>
+
+        {/* Category / Department Pills */}
         <div className="flex flex-col gap-1.5">
-          <label className="text-xs font-bold text-foreground">Category</label>
+          <label className="text-xs font-bold text-foreground">
+            {uploadStoreType === 'grocery' ? 'Shop Department' : 'Meal Category'}
+          </label>
           <div className="no-scrollbar flex gap-1.5 overflow-x-auto pb-1">
-            {PRODUCT_CATEGORY_OPTIONS.map((catOption) => {
+            {activeCategoryOptions.map((catOption) => {
               const isSelected = !isCustomCategory && category === catOption
               return (
                 <button
@@ -1541,6 +1995,7 @@ function AddProductSheet({
                   onClick={() => {
                     setIsCustomCategory(false)
                     setCategory(catOption)
+                    setSubcategory('')
                   }}
                   className={cn(
                     'shrink-0 rounded-full px-3.5 py-1.5 text-xs font-bold transition-colors',
@@ -1582,6 +2037,37 @@ function AddProductSheet({
             />
           )}
         </div>
+
+        {/* Sub-aisle / Subcategory Pills */}
+        {!isCustomCategory && activeSubcategoryOptions.length > 0 && (
+          <div className="flex flex-col gap-1.5">
+            <label className="text-xs font-bold text-foreground">
+              {uploadStoreType === 'grocery' ? 'Sub-Aisle' : 'Subcategory'}
+            </label>
+            <div className="no-scrollbar flex gap-1.5 overflow-x-auto pb-1">
+              {activeSubcategoryOptions.map((subOpt) => {
+                const active = subcategory === subOpt
+                return (
+                  <button
+                    key={subOpt}
+                    type="button"
+                    onClick={() =>
+                      setSubcategory(active ? '' : subOpt)
+                    }
+                    className={cn(
+                      'shrink-0 rounded-full border px-3 py-1 text-xs font-semibold transition-colors',
+                      active
+                        ? 'border-primary bg-primary/15 text-primary'
+                        : 'border-border bg-background text-muted-foreground',
+                    )}
+                  >
+                    {subOpt}
+                  </button>
+                )
+              })}
+            </div>
+          </div>
+        )}
 
         {/* Description */}
         <div className="flex flex-col gap-1">

@@ -3,6 +3,7 @@
 import Image from 'next/image'
 import { useMemo, useState } from 'react'
 import { type MenuItem } from '@/lib/data'
+import { formatDistanceKm } from '@/lib/location'
 import { useStore } from './store'
 import { ProductCard, ProductSheet } from './product-card'
 import {
@@ -16,7 +17,13 @@ import { cn } from '@/lib/utils'
 import { useFirebaseProducts } from '@/lib/firebase-db'
 
 export function RestaurantScreen() {
-  const { activeRestaurant, goHome } = useStore()
+  const {
+    activeRestaurant,
+    goHome,
+    getStoreDistanceKm,
+    getStoreDeliveryFee,
+    getStoreDeliveryTime,
+  } = useStore()
   const [selected, setSelected] = useState<MenuItem | null>(null)
   const [activeSection, setActiveSection] = useState<string>('All')
   const { products: fbProducts } = useFirebaseProducts()
@@ -95,7 +102,7 @@ export function RestaurantScreen() {
           {r.name}
         </h1>
         <p className="mt-0.5 text-sm font-medium text-muted-foreground">
-          {r.cuisine} · {r.deliveryFee || 'R15 delivery'}
+          {r.cuisine} · <span className="font-extrabold text-[#e07a2e]">{formatDistanceKm(getStoreDistanceKm(r))}</span> · {getStoreDeliveryFee(r)}
         </p>
         <div className="mt-3 flex flex-wrap items-center gap-2">
           {r.reviews && r.reviews > 0 ? (
@@ -113,11 +120,12 @@ export function RestaurantScreen() {
           )}
           <span className="flex items-center gap-1 rounded-full bg-white px-3 py-1.5 text-xs font-medium text-muted-foreground ring-1 ring-border">
             <ClockIcon className="h-3.5 w-3.5" />
-            {r.pickupTime}
+            {getStoreDeliveryTime(r)}
           </span>
-          <span className="flex items-center gap-1 rounded-full bg-white px-3 py-1.5 text-xs font-medium text-muted-foreground ring-1 ring-border">
-            <PinIcon className="h-3.5 w-3.5" />
-            {r.location}
+          <span className="flex items-center gap-1.5 rounded-full bg-white px-3 py-1.5 text-xs font-semibold text-foreground ring-1 ring-border">
+            <PinIcon className="h-3.5 w-3.5 text-[#e07a2e]" />
+            <span className="font-bold text-[#e07a2e]">{formatDistanceKm(getStoreDistanceKm(r))}</span>
+            <span className="text-muted-foreground">({r.location})</span>
           </span>
         </div>
 

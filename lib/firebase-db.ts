@@ -45,6 +45,11 @@ export type ProductDoc = {
   name: string
   description: string
   price: number
+  oldPrice?: number
+  size?: string
+  subcategory?: string
+  storeType?: 'restaurant' | 'grocery'
+  popular?: boolean
   category: string
   images: string[]
   modifierGroups?: any[]
@@ -186,6 +191,13 @@ const restaurantsFetcher = async (): Promise<Restaurant[]> => {
         name: p.name,
         description: p.description || '',
         price: Number(p.price) || 0,
+        oldPrice:
+          p.oldPrice && Number(p.oldPrice) > Number(p.price)
+            ? Number(p.oldPrice)
+            : undefined,
+        size: p.size ? String(p.size).trim() : undefined,
+        subcategory: p.subcategory ? String(p.subcategory).trim() : undefined,
+        popular: Boolean(p.popular),
         image: (p.images && p.images[0]) || storeImage,
         section: (p.category || 'Menu').trim(),
         modifiers: Array.isArray(p.modifierGroups)
@@ -212,6 +224,9 @@ const restaurantsFetcher = async (): Promise<Restaurant[]> => {
           ]
           if (!existingRest.image) {
             existingRest.image = storeImage
+          }
+          if (!existingRest.storeType && firstProd.storeType) {
+            existingRest.storeType = firstProd.storeType
           }
         }
       } else {
@@ -244,6 +259,7 @@ const restaurantsFetcher = async (): Promise<Restaurant[]> => {
 
         const isGrocery =
           uData?.storeType === 'grocery' ||
+          firstProd.storeType === 'grocery' ||
           isGroceryCategory(categoryName) ||
           isGroceryCategory(storeName)
 
@@ -255,12 +271,14 @@ const restaurantsFetcher = async (): Promise<Restaurant[]> => {
           rating: 5.0,
           reviews: 1,
           pickupTime: pickupTime,
-          deliveryFee: isGrocery ? 'R10 delivery' : 'R15 delivery',
+          deliveryFee: isGrocery ? 'R15 delivery' : 'R15 delivery',
           priceLevel: `R ${Number(firstProd.price).toFixed(2)}`,
           location: storeLocation,
           open: true,
           campusIds: campusIds,
           storeType: isGrocery ? 'grocery' : 'restaurant',
+          coords: uData?.coords,
+          deliveryRadiusKm: uData?.deliveryRadiusKm || 15,
           menu: mappedMenu,
         }
 
@@ -433,49 +451,88 @@ export async function createProduct(
       imageFiles.length > 0 ? await uploadProductImages(imageFiles, merchantId) : []
 
     const newDocRef = doc(collection(db, 'products'))
+    const resolvedStoreType: 'restaurant' | 'grocery' =
+      productData.storeType === 'grocery' || isGroceryCategory(productData.category)
+        ? 'grocery'
+        : 'restaurant'
+
     const newProduct: ProductDoc = {
       id: newDocRef.id,
       merchantId,
       createdAt: Date.now(),
-      ...productData,
       name: String(productData.name || '').trim(),
       description: String(productData.description || '').trim(),
       category: String(productData.category || 'Menu').trim(),
       price: numericPrice,
+      storeType: resolvedStoreType,
       modifierGroups: sanitizeModifierGroups(productData.modifierGroups),
       images: uploadedImageUrls.length > 0 ? uploadedImageUrls : productData.images || [],
+    }
+    if (productData.size && String(productData.size).trim()) {
+      newProduct.size = String(productData.size).trim()
+    }
+    if (productData.subcategory && String(productData.subcategory).trim()) {
+      newProduct.subcategory = String(productData.subcategory).trim()
+    }
+    if (
+      productData.oldPrice !== undefined &&
+      Number.isFinite(Number(productData.oldPrice)) &&
+      Number(productData.oldPrice) > numericPrice
+    ) {
+      newProduct.oldPrice = Number(productData.oldPrice)
     }
 
     await setDoc(newDocRef, newProduct)
 
-    // Ensure restaurant profile exists in Firestore for this merchant
+    // Ensure restaurant/store profile exists in Firestore and has accurate storeType & coords
     try {
       const restaurantRef = doc(db, 'restaurants', merchantId)
       const restaurantSnap = await getDoc(restaurantRef)
       if (!restaurantSnap.exists()) {
-        // Fetch user name for store title
-        let storeName = 'Campus Store'
+        let storeName = resolvedStoreType === 'grocery' ? 'Local Shop' : 'Local Restaurant'
+        let storeLocation = 'Johannesburg'
+        let storeCoords: any = undefined
         try {
           const userSnap = await getDoc(doc(db, 'users', merchantId))
-          if (userSnap.exists()) storeName = userSnap.data().name || storeName
+          if (userSnap.exists()) {
+            const uData = userSnap.data()
+            storeName = uData.storeName || uData.name || storeName
+            storeLocation = uData.storeLocation || uData.location || storeLocation
+            storeCoords = uData.coords
+          }
         } catch (_e) {
           // Ignore user doc lookup error
         }
 
-        await setDoc(restaurantRef, {
+        const restPayload: Record<string, any> = {
           id: merchantId,
           name: storeName,
-          cuisine: newProduct.category || 'Campus Food',
-          image: (newProduct.images && newProduct.images[0]) || '/food/burger.png',
+          cuisine: newProduct.category || (resolvedStoreType === 'grocery' ? 'Groceries & Essentials' : 'Meals & Takeaways'),
+          image:
+            (newProduct.images && newProduct.images[0]) ||
+            (resolvedStoreType === 'grocery' ? '/food/spaza-store.jpg' : '/food/featured-burger.jpg'),
           rating: 5.0,
           reviews: 1,
-          pickupTime: '10-15 min',
-          priceLevel: `R ${numericPrice}`,
-          location: 'Campus Center',
+          pickupTime: resolvedStoreType === 'grocery' ? '20-30 min' : '15-25 min',
+          priceLevel: `R ${numericPrice.toFixed(2)}`,
+          location: storeLocation,
           open: true,
+          storeType: resolvedStoreType,
+          deliveryRadiusKm: 15,
           campusIds: ['aucklandpark', 'buntingroad', 'doornfontein', 'soweto'],
           menu: [],
-        }, { merge: true })
+        }
+        if (storeCoords) {
+          restPayload.coords = storeCoords
+        }
+
+        await setDoc(restaurantRef, restPayload, { merge: true })
+      } else if (productData.storeType) {
+        await setDoc(
+          restaurantRef,
+          { storeType: resolvedStoreType },
+          { merge: true }
+        )
       }
     } catch (restErr) {
       console.warn('Could not auto-create restaurant profile:', restErr)
@@ -543,9 +600,18 @@ export async function updateProduct(
     }
 
     const sanitizedUpdates: Record<string, any> = {
-      ...updates,
       images: finalImages,
       updatedAt: Date.now(),
+    }
+    if (updates.name !== undefined) sanitizedUpdates.name = String(updates.name).trim()
+    if (updates.description !== undefined) sanitizedUpdates.description = String(updates.description).trim()
+    if (updates.category !== undefined) sanitizedUpdates.category = String(updates.category).trim()
+    if (updates.storeType !== undefined) sanitizedUpdates.storeType = updates.storeType
+    if (updates.size !== undefined) sanitizedUpdates.size = String(updates.size || '').trim()
+    if (updates.subcategory !== undefined) sanitizedUpdates.subcategory = String(updates.subcategory || '').trim()
+    if (updates.oldPrice !== undefined) {
+      const numOld = Number(updates.oldPrice)
+      sanitizedUpdates.oldPrice = Number.isFinite(numOld) && numOld > 0 ? numOld : null
     }
     if (updates.price !== undefined) {
       const numericPrice = Number(updates.price)

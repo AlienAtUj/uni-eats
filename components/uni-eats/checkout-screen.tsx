@@ -1,7 +1,8 @@
 'use client'
 
-import { useState, useEffect } from 'react'
-import { campuses, formatPrice } from '@/lib/data'
+import { useState, useEffect, useMemo } from 'react'
+import { restaurants, formatPrice } from '@/lib/data'
+import { calculateDeliveryFeeAmount, formatDistanceKm } from '@/lib/location'
 import { useStore } from './store'
 import { BottomSheet } from './sheet'
 import {
@@ -54,8 +55,8 @@ export function CheckoutScreen() {
     cart,
     subtotal,
     goToScreen,
-    campusId,
-    customLocationLabel,
+    userLocation,
+    getStoreDistanceKm,
     pickupTime,
     setPickupTime,
     paymentMethod,
@@ -67,9 +68,22 @@ export function CheckoutScreen() {
   const [isProcessingPayment, setIsProcessingPayment] = useState(false)
   const [paymentError, setPaymentError] = useState<string | null>(null)
 
-  const campus = campuses.find((c) => c.id === campusId) ?? campuses[0]
-  const locationDisplay = customLocationLabel || `${campus.name} · ${campus.location}`
-  const total = subtotal + SERVICE_FEE
+  const orderRestaurant = useMemo(() => {
+    if (cart.length === 0) return null
+    return restaurants.find((r) => r.id === cart[0].restaurantId) || null
+  }, [cart])
+
+  const storeDistanceKm = useMemo(() => {
+    if (!orderRestaurant) return 1.5
+    return getStoreDistanceKm(orderRestaurant)
+  }, [orderRestaurant, getStoreDistanceKm])
+
+  const deliveryFee = useMemo(() => {
+    return calculateDeliveryFeeAmount(storeDistanceKm, orderRestaurant?.storeType === 'grocery')
+  }, [storeDistanceKm, orderRestaurant])
+
+  const locationDisplay = userLocation?.label || userLocation?.address || 'Delivery address not set'
+  const total = subtotal + deliveryFee + SERVICE_FEE
 
   // Load official Paystack Inline V1 script safely
   useEffect(() => {
@@ -323,6 +337,10 @@ export function CheckoutScreen() {
           </div>
           <div className="my-3 h-px bg-border" />
           <SummaryRow label="Subtotal" value={formatPrice(subtotal)} />
+          <SummaryRow
+            label={`Delivery fee (${formatDistanceKm(storeDistanceKm)})`}
+            value={formatPrice(deliveryFee)}
+          />
           <SummaryRow label="Service fee" value={formatPrice(SERVICE_FEE)} />
           <div className="my-3 h-px bg-border" />
           <SummaryRow label="Total" value={formatPrice(total)} strong />
