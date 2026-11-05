@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200">
+  <rect width="200" height="200" fill="#ffffff"/>
+  <ellipse cx="100" cy="166" rx="58" ry="10" fill="#000000" opacity="0.08"/>
+  <!-- Whole avocado back left -->
+  <path d="M76 48 C62 48, 54 68, 48 92 C40 120, 52 152, 78 152 C104 152, 114 120, 106 92 C100 68, 90 48, 76 48 Z" fill="#2f5227" stroke="#1e3619" stroke-width="3"/>
+  <!-- Halved avocado front right -->
+  <path d="M126 56 C112 56, 104 74, 98 98 C90 124, 102 156, 128 156 C154 156, 164 124, 156 98 C150 74, 140 56, 126 56 Z" fill="#3a6330" stroke="#1e3619" stroke-width="3"/>
+  <path d="M126 62 C115 62, 108 78, 103 99 C96 122, 106 149, 128 149 C150 149, 158 122, 151 99 C146 78, 137 62, 126 62 Z" fill="#d8ee9e"/>
+  <path d="M126 68 C118 68, 112 82, 108 100 C102 120, 110 143, 128 143 C146 143, 152 120, 146 100 C142 82, 134 68, 126 68 Z" fill="#f2f7c4"/>
+  <!-- Seed -->
+  <circle cx="127" cy="116" r="18" fill="#8c5230" stroke="#4a2813" stroke-width="2.8"/>
+  <ellipse cx="121" cy="110" rx="5" ry="7" fill="#b3744d" opacity="0.6"/>
+</svg>

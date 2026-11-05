@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200">
+  <rect width="200" height="200" fill="#ffffff"/>
+  <ellipse cx="100" cy="162" rx="66" ry="11" fill="#000000" opacity="0.08"/>
+  <rect x="28" y="48" width="144" height="106" rx="20" fill="#2b2d30" stroke="#16171a" stroke-width="3"/>
+  <!-- Two pork chops -->
+  <path d="M46 88 C46 66, 76 62, 94 76 C108 88, 104 114, 88 124 L60 136 C48 138, 46 110, 46 88 Z" fill="#fde3dc" stroke="#592922" stroke-width="2.8"/>
+  <ellipse cx="74" cy="96" rx="18" ry="15" fill="#e8685c"/>
+  <path d="M98 84 C98 64, 128 60, 146 74 C160 86, 156 112, 140 122 L112 134 C100 136, 98 106, 98 84 Z" fill="#fde3dc" stroke="#592922" stroke-width="2.8"/>
+  <ellipse cx="126" cy="92" rx="18" ry="15" fill="#e8685c"/>
+</svg>

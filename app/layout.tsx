@@ -10,15 +10,15 @@ const jakarta = Plus_Jakarta_Sans({
 })
 
 export const metadata: Metadata = {
-  title: 'UniEats — Good Food. Great Times.',
+  title: 'Dash — Good Food. Great Times.',
   description:
-    'Order food fast across your university campus. Featured restaurants, trending meals, and quick campus pickup with UniEats.',
-  applicationName: 'UniEats',
+    'Order meals and groceries fast from restaurants and stores near you. Featured meals, local shops, and quick delivery with Dash.',
+  applicationName: 'Dash',
   manifest: '/manifest.webmanifest',
   appleWebApp: {
     capable: true,
     statusBarStyle: 'black-translucent',
-    title: 'UniEats',
+    title: 'Dash',
   },
   icons: {
     icon: [

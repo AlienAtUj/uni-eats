@@ -46,7 +46,7 @@ export default function SignUpPage() {
 
       <div className="mb-8">
         <h1 className="text-2xl font-extrabold tracking-tight text-foreground">Create account</h1>
-        <p className="mt-2 text-sm text-muted-foreground">Join UniEats and order food fast, or sell to students.</p>
+        <p className="mt-2 text-sm text-muted-foreground">Join Dash to order meals & groceries near you, or sell to customers.</p>
       </div>
 
       <form onSubmit={handleSubmit} className="flex flex-col gap-5">

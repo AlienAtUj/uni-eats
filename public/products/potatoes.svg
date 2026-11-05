@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200">
+  <rect width="200" height="200" fill="#ffffff"/>
+  <ellipse cx="100" cy="166" rx="58" ry="10" fill="#000000" opacity="0.08"/>
+  <!-- Kraft bag -->
+  <path d="M52 58 L148 58 L156 154 C156 160, 150 164, 142 164 L58 164 C50 164, 44 160, 44 154 Z" fill="#d9b07c" stroke="#5c4022" stroke-width="3" stroke-linejoin="round"/>
+  <path d="M52 58 L58 46 L70 54 L84 46 L100 54 L116 46 L130 54 L142 46 L148 58 Z" fill="#e6c394" stroke="#5c4022" stroke-width="2.8" stroke-linejoin="round"/>
+  <!-- Window showing potatoes -->
+  <rect x="62" y="84" width="76" height="54" rx="12" fill="#5c4022"/>
+  <ellipse cx="84" cy="114" rx="20" ry="15" fill="#e0b575" stroke="#5c4022" stroke-width="2"/>
+  <ellipse cx="116" cy="118" rx="19" ry="14" fill="#d4a664" stroke="#5c4022" stroke-width="2"/>
+  <ellipse cx="100" cy="100" rx="18" ry="13" fill="#e8c084" stroke="#5c4022" stroke-width="2"/>
+  <rect x="68" y="68" width="64" height="10" rx="4" fill="#287d46"/>
+</svg>

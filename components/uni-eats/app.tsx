@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation'
 import { StoreProvider, useStore } from './store'
 import { HomeScreen } from './home-screen'
 import { RestaurantScreen } from './restaurant-screen'
+import { ShopCategoryScreen } from './shop-category-screen'
 import { CartScreen } from './cart-screen'
 import { CheckoutScreen } from './checkout-screen'
 import { TrackingScreen } from './tracking-screen'
@@ -38,6 +39,8 @@ function Screens() {
   switch (screen) {
     case 'restaurant':
       return <RestaurantScreen />
+    case 'shop-category':
+      return <ShopCategoryScreen />
     case 'cart':
       return <CartScreen />
     case 'checkout':

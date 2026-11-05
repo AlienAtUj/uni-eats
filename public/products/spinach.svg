@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200">
+  <rect width="200" height="200" fill="#ffffff"/>
+  <ellipse cx="100" cy="166" rx="52" ry="9" fill="#000000" opacity="0.08"/>
+  <!-- Left leaf -->
+  <path d="M84 148 L64 90 C44 74, 48 44, 72 44 C92 44, 102 68, 92 94 Z" fill="#3b9432" stroke="#1e4d19" stroke-width="3" stroke-linejoin="round"/>
+  <!-- Right leaf -->
+  <path d="M106 148 L128 92 C148 76, 146 46, 122 46 C102 46, 94 70, 102 96 Z" fill="#35872c" stroke="#1e4d19" stroke-width="3" stroke-linejoin="round"/>
+  <!-- Center leaf -->
+  <path d="M95 154 L95 40 C70 38, 60 72, 74 102 C82 118, 90 136, 95 154 C100 136, 108 118, 116 102 C130 72,120 38, 95 40 Z" fill="#46ab3c" stroke="#1e4d19" stroke-width="3" stroke-linejoin="round"/>
+  <path d="M95 152 L95 56 M95 98 L82 82 M95 82 L108 68 M95 114 L108 98" fill="none" stroke="#a8e096" stroke-width="3" stroke-linecap="round"/>
+  <!-- Tie band -->
+  <rect x="82" y="136" width="26" height="8" rx="3" fill="#e59838" stroke="#5c3812" stroke-width="2.2"/>
+</svg>

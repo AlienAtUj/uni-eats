@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200">
+  <rect width="200" height="200" fill="#ffffff"/>
+  <ellipse cx="100" cy="162" rx="66" ry="11" fill="#000000" opacity="0.08"/>
+  <rect x="28" y="48" width="144" height="106" rx="20" fill="#2b2d30" stroke="#16171a" stroke-width="3"/>
+  <!-- Two chicken breast fillets -->
+  <path d="M48 92 C48 68, 84 62, 102 78 C116 90, 108 126, 84 134 C62 140, 48 116, 48 92 Z" fill="#f7b9a1" stroke="#6e3b2b" stroke-width="2.8"/>
+  <path d="M94 86 C98 64, 134 62, 148 80 C160 96, 148 130, 124 136 C102 140, 90 110, 94 86 Z" fill="#fcc5af" stroke="#6e3b2b" stroke-width="2.8"/>
+  <path d="M66 84 Q80 96 76 116 M114 82 Q128 96 122 118" fill="none" stroke="#fde2d6" stroke-width="2.5" stroke-linecap="round"/>
+</svg>

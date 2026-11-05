@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200">
+  <rect width="200" height="200" fill="#ffffff"/>
+  <ellipse cx="100" cy="168" rx="48" ry="9" fill="#000000" opacity="0.08"/>
+  <!-- 2.5kg White paper bag -->
+  <path d="M54 44 L146 44 L152 162 L48 162 Z" fill="#fcfaf5" stroke="#3b352c" stroke-width="3" stroke-linejoin="round"/>
+  <rect x="54" y="36" width="92" height="10" rx="3" fill="#287d46" stroke="#3b352c" stroke-width="2.5"/>
+  <!-- Green & gold band -->
+  <rect x="51" y="72" width="98" height="44" fill="#287d46"/>
+  <!-- Maize cob emblem -->
+  <ellipse cx="100" cy="94" rx="12" ry="20" fill="#ffd23f" stroke="#3b352c" stroke-width="2.2"/>
+  <path d="M88 106 C80 94, 84 82, 92 98 M112 106 C120 94, 116 82, 108 98" fill="#52ab3a" stroke="#3b352c" stroke-width="2"/>
+</svg>

@@ -47,7 +47,7 @@ export function BottomNav() {
                     </span>
                   )}
                 </span>
-                {label}
+                {key === 'cart' && itemCount > 0 ? `Cart (${itemCount})` : label}
               </button>
             </li>
           )

@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200">
+  <rect width="200" height="200" fill="#ffffff"/>
+  <ellipse cx="100" cy="164" rx="56" ry="10" fill="#000000" opacity="0.08"/>
+  <!-- Left onion -->
+  <path d="M78 60 C74 74, 44 86, 44 118 C44 142, 60 154, 78 154 C96 154, 112 142, 112 118 C112 86, 82 74, 78 60 Z" fill="#d68945" stroke="#593315" stroke-width="3"/>
+  <path d="M78 62 C64 88, 62 128, 78 154 M78 62 C92 88, 94 128, 78 154" fill="none" stroke="#b86c2c" stroke-width="2"/>
+  <!-- Right onion -->
+  <path d="M126 68 C122 80, 96 92, 96 122 C96 144, 110 156, 126 156 C142 156, 156 144, 156 122 C156 92, 130 80, 126 68 Z" fill="#e09653" stroke="#593315" stroke-width="3"/>
+  <path d="M126 70 C114 94, 112 130, 126 156 M126 70 C138 94, 140 130, 126 156" fill="none" stroke="#c27838" stroke-width="2"/>
+</svg>

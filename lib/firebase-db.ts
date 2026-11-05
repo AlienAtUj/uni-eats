@@ -19,7 +19,14 @@ import {
 import { auth, db } from './firebase'
 import useSWR from 'swr'
 import { seedInitialDataIfNeeded } from './seed-data'
-import { Restaurant, restaurants as fallbackRestaurants } from './data'
+import {
+  Restaurant,
+  restaurants as fallbackRestaurants,
+  defaultGroceryStores,
+  defaultRestaurants,
+  isGroceryCategory,
+  campuses,
+} from './data'
 
 /* 
   High Scalability Note: 
@@ -235,18 +242,25 @@ const restaurantsFetcher = async (): Promise<Restaurant[]> => {
           }
         }
 
+        const isGrocery =
+          uData?.storeType === 'grocery' ||
+          isGroceryCategory(categoryName) ||
+          isGroceryCategory(storeName)
+
         const synthesizedRestaurant: Restaurant = {
           id: merchantId,
           name: storeName,
           cuisine: categoryName,
           image: storeImage,
-          rating: 0,
-          reviews: 0,
+          rating: 5.0,
+          reviews: 1,
           pickupTime: pickupTime,
+          deliveryFee: isGrocery ? 'R10 delivery' : 'R15 delivery',
           priceLevel: `R ${Number(firstProd.price).toFixed(2)}`,
           location: storeLocation,
           open: true,
           campusIds: campusIds,
+          storeType: isGrocery ? 'grocery' : 'restaurant',
           menu: mappedMenu,
         }
 
@@ -258,6 +272,43 @@ const restaurantsFetcher = async (): Promise<Restaurant[]> => {
     const err = productsSnapResult.reason
     if (err?.code !== 'permission-denied') {
       console.warn('Firestore products-to-restaurants fetch warning:', err?.message || err)
+    }
+  }
+
+  // Normalize storeType, deliveryFee, and rating on all fetched restaurants
+  for (const r of existingRestaurants) {
+    if (!r.storeType) {
+      const inferredGrocery =
+        isGroceryCategory(r.cuisine) ||
+        isGroceryCategory(r.name) ||
+        (Array.isArray(r.menu) &&
+          r.menu.length > 0 &&
+          r.menu.some((m) => isGroceryCategory(m.section)))
+      r.storeType = inferredGrocery ? 'grocery' : 'restaurant'
+    }
+    if (!r.deliveryFee) {
+      r.deliveryFee = r.storeType === 'grocery' ? 'R10 delivery' : 'R15 delivery'
+    }
+    if (!r.rating || r.rating <= 0) {
+      r.rating = 5.0
+    }
+  }
+
+  // Only fall back to defaultRestaurants if the database has no meal restaurants
+  const hasMealRestaurant = existingRestaurants.some((r) => r.storeType !== 'grocery')
+  const existingNames = new Set(existingRestaurants.map((r) => r.name.toLowerCase().trim()))
+  if (!hasMealRestaurant) {
+    for (const defRest of defaultRestaurants) {
+      if (!restaurantIds.has(defRest.id) && !existingNames.has(defRest.name.toLowerCase().trim())) {
+        existingRestaurants.push(defRest)
+        restaurantIds.add(defRest.id)
+      }
+    }
+  }
+  for (const defStore of defaultGroceryStores) {
+    if (!restaurantIds.has(defStore.id) && !existingNames.has(defStore.name.toLowerCase().trim())) {
+      existingRestaurants.push(defStore)
+      restaurantIds.add(defStore.id)
     }
   }
 

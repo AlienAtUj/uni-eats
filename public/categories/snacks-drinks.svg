@@ -1,0 +1,45 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 84 84" width="512" height="512">
+  <!-- Edge-to-edge pastel yellow background -->
+  <rect width="84" height="84" fill="#fbe58f"/>
+
+  <!-- 1. Fluffy Popcorn Cloud -->
+  <path d="M 24.5 30 C 22.2 26.8, 23.5 22.2, 27.5 21.2 C 28.2 17.2, 32.2 14.8, 36.2 16 C 38.8 11.8, 45.5 11.2, 49.2 15.2 C 53.5 13.5, 58.2 16.2, 58.5 20.5 C 62.5 21.5, 64.5 26, 62.2 30 Z"
+        fill="#fff199" stroke="#4f291c" stroke-width="2.2" stroke-linejoin="round"/>
+
+  <!-- Inner popcorn kernel texture arcs -->
+  <path d="M 31 22 C 32.8 19.5, 36.2 19.5, 37.5 22" fill="none" stroke="#e0b246" stroke-width="1.9" stroke-linecap="round"/>
+  <path d="M 41 18.5 C 43 16, 46.5 16, 48 18.5" fill="none" stroke="#e0b246" stroke-width="1.9" stroke-linecap="round"/>
+  <path d="M 50.5 22.5 C 52.5 20, 55.5 20.5, 56.5 23" fill="none" stroke="#e0b246" stroke-width="1.9" stroke-linecap="round"/>
+  <path d="M 36.5 25.5 C 38.5 23, 42.5 23, 44.2 25.5" fill="none" stroke="#e0b246" stroke-width="1.9" stroke-linecap="round"/>
+  <path d="M 46.5 26 C 48.5 23.8, 51.8 24, 53 26.2" fill="none" stroke="#e0b246" stroke-width="1.9" stroke-linecap="round"/>
+  <path d="M 27.5 26 C 29.2 24, 32 24.2, 33.2 26.2" fill="none" stroke="#e0b246" stroke-width="1.9" stroke-linecap="round"/>
+
+  <!-- 2. Striped Popcorn Bucket (5 alternating stripes with scalloped top arches) -->
+  <!-- Stripe 1: Left Red -->
+  <path d="M 24.8 29.5 Q 28.8 26.8 32.6 29.5 L 35.6 67.2 L 30.8 67.2 Q 29.2 67.2 29 65.5 Z"
+        fill="#e03c28" stroke="#682c1f" stroke-width="1.5" stroke-linejoin="round"/>
+
+  <!-- Stripe 2: Left-Center White -->
+  <path d="M 32.6 29.5 Q 36.5 26.8 40.4 29.5 L 41.4 67.2 L 35.6 67.2 Z"
+        fill="#ffffff" stroke="#682c1f" stroke-width="1.5" stroke-linejoin="round"/>
+
+  <!-- Stripe 3: Center Red -->
+  <path d="M 40.4 29.5 Q 44.3 26.8 48.1 29.5 L 47.1 67.2 L 41.4 67.2 Z"
+        fill="#e03c28" stroke="#682c1f" stroke-width="1.5" stroke-linejoin="round"/>
+
+  <!-- Stripe 4: Right-Center White -->
+  <path d="M 48.1 29.5 Q 52 26.8 55.9 29.5 L 52.9 67.2 L 47.1 67.2 Z"
+        fill="#ffffff" stroke="#682c1f" stroke-width="1.5" stroke-linejoin="round"/>
+
+  <!-- Stripe 5: Right Red -->
+  <path d="M 55.9 29.5 Q 59.8 26.8 63.6 29.5 L 59.5 65.5 Q 59.2 67.2 57.6 67.2 L 52.9 67.2 Z"
+        fill="#e03c28" stroke="#682c1f" stroke-width="1.5" stroke-linejoin="round"/>
+
+  <!-- Outer bucket contour stroke for crispness -->
+  <path d="M 24.8 29.5 Q 28.8 26.8 32.6 29.5 Q 36.5 26.8 40.4 29.5 Q 44.3 26.8 48.1 29.5 Q 52 26.8 55.9 29.5 Q 59.8 26.8 63.6 29.5 L 59.5 65.5 Q 59.2 67.2 57.6 67.2 L 30.8 67.2 Q 29.2 67.2 29 65.5 Z"
+        fill="none" stroke="#4f291c" stroke-width="2.2" stroke-linejoin="round"/>
+
+  <!-- 3. Center White Oval Badge -->
+  <ellipse cx="44.3" cy="48.5" rx="10.8" ry="7.4"
+           fill="#ffffff" stroke="#5e3527" stroke-width="1.8"/>
+</svg>

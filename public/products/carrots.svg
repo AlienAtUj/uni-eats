@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200">
+  <rect width="200" height="200" fill="#ffffff"/>
+  <ellipse cx="100" cy="166" rx="56" ry="9" fill="#000000" opacity="0.08"/>
+  <!-- Leaf tops -->
+  <path d="M132 58 C142 38, 158 40, 148 60 C162 50, 168 64, 150 70" fill="none" stroke="#3d9934" stroke-width="5" stroke-linecap="round"/>
+  <!-- Back carrot -->
+  <path d="M126 52 C136 52, 144 62, 136 76 L72 154 C66 160, 60 156, 64 148 L114 58 C118 52, 122 52, 126 52 Z" fill="#ed6c1c" stroke="#59280a" stroke-width="3"/>
+  <!-- Front carrot -->
+  <path d="M140 66 C150 66, 156 76, 148 90 L64 160 C58 164, 52 158, 58 152 L126 72 C130 66, 135 66, 140 66 Z" fill="#ff7f2a" stroke="#59280a" stroke-width="3"/>
+  <path d="M118 90 L126 96 M102 108 L112 114 M86 126 L94 132" stroke="#c4510c" stroke-width="2.5" stroke-linecap="round"/>
+</svg>

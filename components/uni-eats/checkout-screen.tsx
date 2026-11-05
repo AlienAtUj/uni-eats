@@ -55,6 +55,7 @@ export function CheckoutScreen() {
     subtotal,
     goToScreen,
     campusId,
+    customLocationLabel,
     pickupTime,
     setPickupTime,
     paymentMethod,
@@ -66,7 +67,8 @@ export function CheckoutScreen() {
   const [isProcessingPayment, setIsProcessingPayment] = useState(false)
   const [paymentError, setPaymentError] = useState<string | null>(null)
 
-  const campus = campuses.find((c) => c.id === campusId)!
+  const campus = campuses.find((c) => c.id === campusId) ?? campuses[0]
+  const locationDisplay = customLocationLabel || `${campus.name} · ${campus.location}`
   const total = subtotal + SERVICE_FEE
 
   // Load official Paystack Inline V1 script safely
@@ -115,7 +117,7 @@ export function CheckoutScreen() {
     }
 
     setIsProcessingPayment(true)
-    const customerEmail = user?.email || 'student@campus.unieats.co.za'
+    const customerEmail = user?.email || 'customer@dash.co.za'
     const cartPayload = cart.map((line) => ({
       itemId: line.itemId,
       quantity: line.quantity,
@@ -256,7 +258,7 @@ export function CheckoutScreen() {
                 {cart[0].restaurantName}
               </p>
               <p className="text-xs text-muted-foreground">
-                {campus.name} · {campus.location}
+                {locationDisplay}
               </p>
             </div>
           </div>

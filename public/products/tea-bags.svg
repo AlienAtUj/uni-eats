@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200">
+  <rect width="200" height="200" fill="#ffffff"/>
+  <ellipse cx="100" cy="164" rx="54" ry="9" fill="#000000" opacity="0.08"/>
+  <rect x="44" y="58" width="112" height="98" rx="10" fill="#c93b2b" stroke="#4a1610" stroke-width="3"/>
+  <path d="M44 78 L156 78" stroke="#f5b82e" stroke-width="4"/>
+  <!-- Teacup illustration -->
+  <path d="M80 104 L120 104 C120 124, 80 124, 80 104 Z" fill="#ffffff" stroke="#4a1610" stroke-width="2.5"/>
+  <path d="M120 108 C128 108, 128 118, 118 118" fill="none" stroke="#ffffff" stroke-width="3"/>
+  <ellipse cx="100" cy="126" rx="24" ry="4" fill="#ffffff"/>
+</svg>

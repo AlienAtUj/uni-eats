@@ -1,5 +1,5 @@
-const CACHE_NAME = 'unieats-shell-v1'
-const PRECACHE_URLS = ['/', '/icon-192.png', '/icon-512.png', '/unieats-logo.jpg']
+const CACHE_NAME = 'dash-shell-v2'
+const PRECACHE_URLS = ['/', '/icon-192.png', '/icon-512.png', '/dash-logo.jpg', '/unieats-logo.jpg']
 
 self.addEventListener('install', (event) => {
   event.waitUntil(

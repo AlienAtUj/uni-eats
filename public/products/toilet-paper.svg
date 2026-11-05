@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200">
+  <rect width="200" height="200" fill="#ffffff"/>
+  <ellipse cx="100" cy="166" rx="58" ry="10" fill="#000000" opacity="0.08"/>
+  <rect x="40" y="52" width="120" height="106" rx="14" fill="#e6f4fc" stroke="#26547c" stroke-width="3"/>
+  <!-- 6 visible rolls inside pack -->
+  <circle cx="66" cy="82" r="16" fill="#ffffff" stroke="#99b8d0" stroke-width="2"/>
+  <circle cx="66" cy="82" r="5" fill="#c49a6c"/>
+  <circle cx="100" cy="82" r="16" fill="#ffffff" stroke="#99b8d0" stroke-width="2"/>
+  <circle cx="100" cy="82" r="5" fill="#c49a6c"/>
+  <circle cx="134" cy="82" r="16" fill="#ffffff" stroke="#99b8d0" stroke-width="2"/>
+  <circle cx="134" cy="82" r="5" fill="#c49a6c"/>
+  <circle cx="66" cy="124" r="16" fill="#ffffff" stroke="#99b8d0" stroke-width="2"/>
+  <circle cx="66" cy="124" r="5" fill="#c49a6c"/>
+  <circle cx="100" cy="124" r="16" fill="#ffffff" stroke="#99b8d0" stroke-width="2"/>
+  <circle cx="100" cy="124" r="5" fill="#c49a6c"/>
+  <circle cx="134" cy="124" r="16" fill="#ffffff" stroke="#99b8d0" stroke-width="2"/>
+  <circle cx="134" cy="124" r="5" fill="#c49a6c"/>
+  <rect x="56" y="96" width="88" height="18" rx="6" fill="#26547c"/>
+</svg>

@@ -22,7 +22,14 @@ import {
 
 const SERVICE_FEE = 0.99
 
-export type Screen = 'home' | 'restaurant' | 'cart' | 'checkout' | 'tracking' | 'profile'
+export type Screen =
+  | 'home'
+  | 'restaurant'
+  | 'shop-category'
+  | 'cart'
+  | 'checkout'
+  | 'tracking'
+  | 'profile'
 
 export type CartLine = {
   lineId: string
@@ -36,13 +43,21 @@ export type CartLine = {
   restaurantName: string
 }
 
+export type HomeMode = 'eat' | 'shop'
+
 type Store = {
   screen: Screen
+  homeMode: HomeMode
+  setHomeMode: (m: HomeMode) => void
   campusId: string
   setCampus: (id: string) => void
+  customLocationLabel: string | null
+  setCustomLocation: (label: string | null) => void
   activeRestaurant: Restaurant | null
   openRestaurant: (id: string) => void
   goHome: () => void
+  activeDepartmentId: string | null
+  openDepartment: (id: string) => void
   goToScreen: (s: Screen) => void
   cart: CartLine[]
   addLine: (line: Omit<CartLine, 'lineId'>) => void
@@ -86,8 +101,11 @@ const StoreContext = createContext<Store | null>(null)
 
 export function StoreProvider({ children }: { children: ReactNode }) {
   const [screen, setScreen] = useState<Screen>('home')
+  const [homeMode, setHomeMode] = useState<HomeMode>('eat')
   const [campusId, setCampusId] = useState(campuses[0].id)
+  const [customLocationLabel, setCustomLocationLabel] = useState<string | null>(null)
   const [activeId, setActiveId] = useState<string | null>(null)
+  const [activeDepartmentId, setActiveDepartmentId] = useState<string | null>(null)
   const [cart, setCart] = useState<CartLine[]>([])
   const [pickupTime, setPickupTime] = useState('As soon as possible')
   const [paymentMethod, setPaymentMethod] = useState('Paystack (Card / EFT / SnapScan)')
@@ -113,6 +131,10 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             )
             .map((l: any) => ({
               ...l,
+              image:
+                typeof l.image === 'string' && l.image.trim()
+                  ? l.image.trim()
+                  : '/food/featured-burger.jpg',
               unitPrice: Number(l.unitPrice),
               quantity: Math.min(99, Number(l.quantity)),
               modifierLabels: Array.isArray(l.modifierLabels) ? l.modifierLabels : [],
@@ -129,7 +151,17 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         setPlacedOrder(JSON.parse(savedOrder))
       }
       const savedScreen = sessionStorage.getItem('unieats_screen') as Screen
-      if (savedScreen) {
+      const savedDept = sessionStorage.getItem('dash_department')
+      const savedMode = sessionStorage.getItem('dash_home_mode') as HomeMode | null
+      if (savedMode === 'eat' || savedMode === 'shop') {
+        setHomeMode(savedMode)
+      }
+      if (savedScreen === 'shop-category') {
+        if (savedDept) {
+          setActiveDepartmentId(savedDept)
+          setScreen(savedScreen)
+        }
+      } else if (savedScreen) {
         setScreen(savedScreen)
       }
     } catch (e) {
@@ -211,7 +243,10 @@ export function StoreProvider({ children }: { children: ReactNode }) {
                   lineId: it.id || it.name,
                   itemId: it.id || '',
                   name: it.name,
-                  image: '',
+                  image:
+                    typeof it.image === 'string' && it.image.trim()
+                      ? it.image.trim()
+                      : '/food/featured-burger.jpg',
                   quantity: it.quantity || 1,
                   unitPrice: it.price || 0,
                   modifierLabels: (it.modifiers || []).map((m: any) => m.label),
@@ -260,20 +295,48 @@ export function StoreProvider({ children }: { children: ReactNode }) {
 
   const value: Store = {
     screen,
+    homeMode,
+    setHomeMode: (m) => {
+      setHomeMode(m)
+      try {
+        sessionStorage.setItem('dash_home_mode', m)
+      } catch (_e) {
+        // Ignore storage errors
+      }
+    },
     campusId,
-    setCampus: setCampusId,
+    setCampus: (id) => {
+      setCampusId(id)
+      setCustomLocationLabel(null)
+    },
+    customLocationLabel,
+    setCustomLocation: setCustomLocationLabel,
     activeRestaurant,
     openRestaurant: (id) => {
       setActiveId(id)
       handleSetScreen('restaurant')
     },
     goHome: () => handleSetScreen('home'),
+    activeDepartmentId,
+    openDepartment: (id) => {
+      setActiveDepartmentId(id)
+      try {
+        sessionStorage.setItem('dash_department', id)
+      } catch (_e) {
+        // Ignore storage errors
+      }
+      handleSetScreen('shop-category')
+    },
     goToScreen: handleSetScreen,
     cart,
     addLine: (line) =>
       setCart((prev) => {
         const safeUnitPrice = Math.max(0, Number(line.unitPrice) || 0)
         const safeQty = Math.max(1, Math.min(99, Math.round(Number(line.quantity) || 1)))
+        const safeImage =
+          typeof line.image === 'string' && line.image.trim()
+            ? line.image.trim()
+            : '/food/featured-burger.jpg'
 
         if (prev.length > 0 && prev[0].restaurantId !== line.restaurantId) {
           const replace =
@@ -286,6 +349,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           return [
             {
               ...line,
+              image: safeImage,
               unitPrice: safeUnitPrice,
               quantity: safeQty,
               lineId: crypto.randomUUID(),
@@ -308,6 +372,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           ...prev,
           {
             ...line,
+            image: safeImage,
             unitPrice: safeUnitPrice,
             quantity: safeQty,
             lineId: crypto.randomUUID(),
@@ -342,8 +407,9 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     placeOrder: async (paymentMeta) => {
       if (cart.length === 0) return
       const campusName =
-        campuses.find((c) => c.id === campusId)?.name ?? campuses[0].name
-      const orderDisplayId = 'UE-' + Math.floor(1000 + Math.random() * 9000)
+        customLocationLabel ||
+        (campuses.find((c) => c.id === campusId)?.name ?? campuses[0].name)
+      const orderDisplayId = 'DSH-' + Math.floor(1000 + Math.random() * 9000)
       const total =
         typeof paymentMeta?.verifiedTotalZar === 'number' && paymentMeta.verifiedTotalZar > 0
           ? paymentMeta.verifiedTotalZar

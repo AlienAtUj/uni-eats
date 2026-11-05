@@ -3,10 +3,10 @@ import type { MetadataRoute } from 'next'
 export default function manifest(): MetadataRoute.Manifest {
   return {
     id: '/',
-    name: 'UniEats — Campus Food Ordering',
-    short_name: 'UniEats',
+    name: 'Dash — Food & Groceries Near You',
+    short_name: 'Dash',
     description:
-      'Order food fast across your university campus. Browse campus stores, customize meals, and pay securely.',
+      'Order meals and groceries fast from restaurants and stores near you. Browse local shops, customize meals, and pay securely.',
     start_url: '/',
     scope: '/',
     display: 'standalone',

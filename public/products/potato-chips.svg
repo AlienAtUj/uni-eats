@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200">
+  <rect width="200" height="200" fill="#ffffff"/>
+  <ellipse cx="100" cy="168" rx="48" ry="9" fill="#000000" opacity="0.08"/>
+  <!-- Foil chip packet -->
+  <path d="M54 38 L146 38 C142 78, 142 118, 146 158 L54 158 C58 118, 58 78, 54 38 Z" fill="#e03226" stroke="#4a1610" stroke-width="3" stroke-linejoin="round"/>
+  <rect x="52" y="32" width="96" height="8" rx="3" fill="#f5b82e" stroke="#4a1610" stroke-width="2.5"/>
+  <rect x="52" y="156" width="96" height="8" rx="3" fill="#f5b82e" stroke="#4a1610" stroke-width="2.5"/>
+  <!-- White banner & golden chips -->
+  <ellipse cx="100" cy="86" rx="34" ry="22" fill="#ffffff" stroke="#4a1610" stroke-width="2.5"/>
+  <rect x="78" y="80" width="44" height="10" rx="4" fill="#e03226"/>
+  <ellipse cx="88" cy="128" rx="16" ry="11" transform="rotate(-18 88 128)" fill="#ffd24c" stroke="#6e4b10" stroke-width="2.2"/>
+  <ellipse cx="114" cy="132" rx="15" ry="10" transform="rotate(15 114 132)" fill="#ffde6a" stroke="#6e4b10" stroke-width="2.2"/>
+</svg>

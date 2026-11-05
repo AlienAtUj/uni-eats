@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200">
+  <rect width="200" height="200" fill="#ffffff"/>
+  <ellipse cx="100" cy="162" rx="66" ry="11" fill="#000000" opacity="0.08"/>
+  <rect x="28" y="48" width="144" height="106" rx="20" fill="#2b2d30" stroke="#16171a" stroke-width="3"/>
+  <!-- Drumsticks & thighs -->
+  <path d="M52 84 C52 68, 76 66, 86 80 L104 106 L94 114 L72 98 C58 98, 52 92, 52 84 Z" fill="#f7c8a0" stroke="#6e4124" stroke-width="2.8"/>
+  <circle cx="106" cy="112" r="7" fill="#fff5eb" stroke="#6e4124" stroke-width="2.5"/>
+  <path d="M104 72 C118 64, 142 74, 144 92 C146 108, 128 120, 112 112 C98 104, 94 80, 104 72 Z" fill="#f5be90" stroke="#6e4124" stroke-width="2.8"/>
+  <path d="M58 116 C66 104, 92 108, 106 124 L132 130 L130 140 L98 138 C76 142, 52 130, 58 116 Z" fill="#f7c8a0" stroke="#6e4124" stroke-width="2.8"/>
+</svg>

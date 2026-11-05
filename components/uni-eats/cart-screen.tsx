@@ -14,8 +14,9 @@ import {
 const SERVICE_FEE = 0.99
 
 export function CartScreen() {
-  const { cart, updateQty, subtotal, goHome, goToScreen, campusId } = useStore()
-  const campus = campuses.find((c) => c.id === campusId)!
+  const { cart, updateQty, subtotal, goHome, goToScreen, campusId, customLocationLabel } = useStore()
+  const campus = campuses.find((c) => c.id === campusId) ?? campuses[0]
+  const locationDisplay = customLocationLabel || campus.name
   const total = cart.length ? subtotal + SERVICE_FEE : 0
 
   return (
@@ -44,7 +45,7 @@ export function CartScreen() {
               Your cart is empty
             </p>
             <p className="mt-1 text-sm text-muted-foreground">
-              Browse restaurants and add your favorite meals.
+              Browse restaurants and stores near you to add meals or groceries.
             </p>
           </div>
           <button
@@ -52,7 +53,7 @@ export function CartScreen() {
             onClick={goHome}
             className="rounded-full bg-primary px-6 py-3 text-sm font-bold text-primary-foreground"
           >
-            Explore restaurants
+            Explore Dash
           </button>
         </div>
       ) : (
@@ -62,10 +63,10 @@ export function CartScreen() {
               <PinIcon className="h-5 w-5 text-primary" />
               <div>
                 <p className="text-[11px] font-medium text-muted-foreground">
-                  Pickup at
+                  Ordering from
                 </p>
                 <p className="text-sm font-bold text-card-foreground">
-                  {cart[0].restaurantName} · {campus.name}
+                  {cart[0].restaurantName} · {locationDisplay}
                 </p>
               </div>
             </div>
@@ -79,7 +80,11 @@ export function CartScreen() {
               >
                 <div className="relative h-20 w-20 shrink-0 overflow-hidden rounded-2xl">
                   <Image
-                    src={line.image}
+                    src={
+                      line.image && line.image.trim()
+                        ? line.image.trim()
+                        : '/food/featured-burger.jpg'
+                    }
                     alt={line.name}
                     fill
                     className="object-cover"

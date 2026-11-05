@@ -79,7 +79,18 @@ function ItemSheetBody({
   return (
     <div className="flex flex-col gap-5">
       <div className="relative -mx-5 -mt-1 h-44">
-        <Image src={item.image} alt={item.name} fill className="object-cover" />
+        <Image
+          src={
+            item.image && item.image.trim()
+              ? item.image.trim()
+              : restaurant.image && restaurant.image.trim()
+                ? restaurant.image.trim()
+                : '/food/featured-burger.jpg'
+          }
+          alt={item.name}
+          fill
+          className="object-cover"
+        />
       </div>
 
       <div className="flex items-center justify-between gap-2">

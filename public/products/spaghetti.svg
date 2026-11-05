@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200">
+  <rect width="200" height="200" fill="#ffffff"/>
+  <ellipse cx="100" cy="164" rx="64" ry="9" fill="#000000" opacity="0.08"/>
+  <!-- Horizontal pasta pack -->
+  <rect x="24" y="72" width="152" height="64" rx="10" fill="#1d4e89" stroke="#0f2947" stroke-width="3"/>
+  <!-- Window showing golden spaghetti strands -->
+  <rect x="44" y="84" width="112" height="24" rx="6" fill="#f5c84c" stroke="#0f2947" stroke-width="2"/>
+  <line x1="48" y1="92" x2="152" y2="92" stroke="#d9a326" stroke-width="2"/>
+  <line x1="48" y1="98" x2="152" y2="98" stroke="#d9a326" stroke-width="2"/>
+  <line x1="48" y1="104" x2="152" y2="104" stroke="#d9a326" stroke-width="2"/>
+  <rect x="74" y="114" width="52" height="12" rx="4" fill="#e03226"/>
+</svg>

@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 84 84" width="512" height="512">
+  <rect width="84" height="84" fill="#d9ccf5"/>
+  <!-- Filling top -->
+  <circle cx="46" cy="24" r="6" fill="#49a838" stroke="#3f2b4f" stroke-width="2"/>
+  <circle cx="54" cy="28" r="5.5" fill="#e63b2e" stroke="#3f2b4f" stroke-width="2"/>
+  <circle cx="39" cy="29" r="5" fill="#ffd23f" stroke="#3f2b4f" stroke-width="2"/>
+  <!-- Tortilla wrap & foil base -->
+  <path d="M 34 26 L 60 36 L 46 66 L 22 56 Z" fill="#fce7be" stroke="#3f2b4f" stroke-width="2.2" stroke-linejoin="round"/>
+  <path d="M 27 44 L 53 54 L 46 66 L 22 56 Z" fill="#e03c28" stroke="#3f2b4f" stroke-width="2.2" stroke-linejoin="round"/>
+</svg>

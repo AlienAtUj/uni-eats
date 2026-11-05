@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200">
+  <rect width="200" height="200" fill="#ffffff"/>
+  <ellipse cx="100" cy="168" rx="46" ry="9" fill="#000000" opacity="0.08"/>
+  <!-- Chocolate squares sticking out top -->
+  <rect x="66" y="34" width="68" height="38" rx="6" fill="#5c3118" stroke="#33190a" stroke-width="3"/>
+  <rect x="72" y="40" width="24" height="18" rx="3" fill="#733f20" stroke="#33190a" stroke-width="2"/>
+  <rect x="104" y="40" width="24" height="18" rx="3" fill="#733f20" stroke="#33190a" stroke-width="2"/>
+  <!-- Purple wrapper -->
+  <rect x="60" y="64" width="80" height="98" rx="8" fill="#6b3fa0" stroke="#2c1647" stroke-width="3"/>
+  <path d="M60 64 L72 56 L84 64 L96 56 L108 64 L120 56 L132 64 L140 58 L140 68 L60 68 Z" fill="#e8c547" stroke="#2c1647" stroke-width="2"/>
+  <ellipse cx="100" cy="112" rx="26" ry="16" fill="#f7d65a" stroke="#2c1647" stroke-width="2.2"/>
+</svg>

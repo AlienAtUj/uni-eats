@@ -418,8 +418,8 @@ export default function StoreOwnerDashboard() {
                   <div className="flex items-center gap-2.5 min-w-0">
                     <span className="flex h-9 w-9 shrink-0 items-center justify-center overflow-hidden rounded-xl bg-[oklch(0.97_0.02_120)]/10">
                       <Image
-                        src="/unieats-logo.jpg"
-                        alt="UniEats"
+                        src="/dash-logo.jpg"
+                        alt="Dash"
                         width={36}
                         height={36}
                         className="h-full w-full object-cover"
@@ -427,7 +427,7 @@ export default function StoreOwnerDashboard() {
                     </span>
                     <div className="min-w-0">
                       <p className="text-[11px] font-medium text-[oklch(0.97_0.02_120)]/70">
-                        Store Owner Portal
+                        Dash Partner Portal
                       </p>
                       <p className="truncate text-sm font-extrabold tracking-tight">
                         {merchantName}
@@ -847,9 +847,9 @@ export default function StoreOwnerDashboard() {
                               </div>
 
                               <div className="relative h-24 w-24 shrink-0 overflow-hidden rounded-2xl bg-secondary ring-1 ring-border">
-                                {p.images && p.images.length > 0 ? (
+                                {p.images && p.images.length > 0 && p.images[0] && p.images[0].trim() ? (
                                   <Image
-                                    src={p.images[0]}
+                                    src={p.images[0].trim()}
                                     alt={p.name}
                                     fill
                                     className="object-cover"
@@ -1241,6 +1241,11 @@ const PRODUCT_CATEGORY_OPTIONS = [
   'Drinks',
   'Salads',
   'Desserts',
+  'Bread & Milk',
+  'Fresh Produce',
+  'Butcher',
+  'Snacks & Drinks',
+  'Groceries',
 ]
 
 function AddProductSheet({

@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200">
+  <rect width="200" height="200" fill="#ffffff"/>
+  <ellipse cx="100" cy="162" rx="56" ry="9" fill="#000000" opacity="0.08"/>
+  <!-- Stacked soap bars & wrapper -->
+  <rect x="44" y="68" width="112" height="52" rx="16" fill="#46b5a6" stroke="#1b4d46" stroke-width="3"/>
+  <rect x="52" y="98" width="96" height="50" rx="16" fill="#9de3d8" stroke="#1b4d46" stroke-width="3"/>
+  <rect x="68" y="112" width="64" height="22" rx="8" fill="#ffffff" stroke="#1b4d46" stroke-width="2"/>
+</svg>

@@ -47,17 +47,17 @@ export default function LoginPage() {
       </header>
 
       <div className="mb-10 text-center">
-        <div className="mx-auto mb-6 flex h-20 w-20 items-center justify-center overflow-hidden rounded-[1.5rem] bg-primary/10 shadow-sm ring-1 ring-border/50">
+        <div className="mx-auto mb-6 flex h-20 w-20 items-center justify-center overflow-hidden rounded-[1.5rem] bg-[oklch(0.22_0.04_150)] shadow-sm ring-1 ring-border/50">
           <Image 
-            src="/unieats-logo.jpg" 
-            alt="UniEats" 
+            src="/dash-logo.jpg" 
+            alt="Dash" 
             width={80} 
             height={80} 
-            className="h-full w-full object-cover p-2 mix-blend-multiply" 
+            className="h-full w-full object-cover" 
           />
         </div>
         <h1 className="text-2xl font-extrabold tracking-tight text-foreground">Welcome back</h1>
-        <p className="mt-2 text-sm text-muted-foreground">Sign in to your UniEats account to continue.</p>
+        <p className="mt-2 text-sm text-muted-foreground">Sign in to your Dash account to continue.</p>
       </div>
 
       <form onSubmit={handleSubmit} className="flex flex-col gap-5">

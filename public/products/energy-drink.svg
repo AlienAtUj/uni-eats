@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200">
+  <rect width="200" height="200" fill="#ffffff"/>
+  <ellipse cx="100" cy="170" rx="36" ry="8" fill="#000000" opacity="0.08"/>
+  <!-- Sleek tall can -->
+  <rect x="68" y="38" width="64" height="126" rx="10" fill="#1d232b" stroke="#0d1014" stroke-width="3"/>
+  <ellipse cx="100" cy="38" rx="30" ry="6" fill="#d0d5dd" stroke="#0d1014" stroke-width="2.5"/>
+  <!-- Green/gold lightning bolt -->
+  <path d="M106 60 L82 102 L102 102 L92 142 L120 96 L100 96 Z" fill="#5ce62e" stroke="#ffffff" stroke-width="2" stroke-linejoin="round"/>
+</svg>

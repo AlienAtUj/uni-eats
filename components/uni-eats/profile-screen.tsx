@@ -13,6 +13,7 @@ import {
 import { signInWithEmailAndPassword, createUserWithEmailAndPassword } from 'firebase/auth'
 import { auth } from '@/lib/firebase'
 import { dashboardPathForRole, fetchUserRole, saveUserProfile, type UserRole } from '@/lib/firebase-auth'
+import { campuses } from '@/lib/data'
 import { useStore } from './store'
 
 export function ProfileScreen() {
@@ -80,17 +81,17 @@ function AuthLoginForm({ onSwitch }: { onSwitch: () => void }) {
   return (
     <>
       <div className="mb-10 text-center">
-        <div className="mx-auto mb-6 flex h-20 w-20 items-center justify-center overflow-hidden rounded-[1.5rem] bg-primary/10 shadow-sm ring-1 ring-border/50">
+        <div className="mx-auto mb-6 flex h-20 w-20 items-center justify-center overflow-hidden rounded-[1.5rem] bg-[oklch(0.22_0.04_150)] shadow-sm ring-1 ring-border/50">
           <Image 
-            src="/unieats-logo.jpg" 
-            alt="UniEats" 
+            src="/dash-logo.jpg" 
+            alt="Dash" 
             width={80} 
             height={80} 
-            className="h-full w-full object-cover p-2 mix-blend-multiply" 
+            className="h-full w-full object-cover" 
           />
         </div>
         <h1 className="text-2xl font-extrabold tracking-tight text-foreground">Welcome back</h1>
-        <p className="mt-2 text-sm text-muted-foreground">Sign in to your UniEats account to continue.</p>
+        <p className="mt-2 text-sm text-muted-foreground">Sign in to your Dash account to continue.</p>
       </div>
 
       <form onSubmit={handleSubmit} className="flex flex-col gap-5">
@@ -220,7 +221,7 @@ function AuthSignupForm({ onSwitch }: { onSwitch: () => void }) {
     <>
       <div className="mb-8">
         <h1 className="text-2xl font-extrabold tracking-tight text-foreground">Create account</h1>
-        <p className="mt-2 text-sm text-muted-foreground">Join UniEats and order food fast, or sell to students.</p>
+        <p className="mt-2 text-sm text-muted-foreground">Join Dash to order meals & groceries near you, or sell to customers.</p>
       </div>
 
       <form onSubmit={handleSubmit} className="flex flex-col gap-5">
@@ -293,46 +294,48 @@ function AuthSignupForm({ onSwitch }: { onSwitch: () => void }) {
             </div>
             
             <div className="flex flex-col gap-2">
-              <label className="text-sm font-bold text-foreground">Campus</label>
+              <label className="text-sm font-bold text-foreground">Area / Location</label>
               <select
                 value={campusId}
                 onChange={(e) => setCampusId(e.target.value)}
                 className="w-full rounded-2xl border bg-card px-4 py-3 text-sm outline-none transition-all focus:border-primary focus:ring-1 focus:ring-primary shadow-sm placeholder:text-muted-foreground"
                 required
               >
-                <option value="aucklandpark">Auckland Park Kingsway Content</option>
-                <option value="buntingroad">Bunting Road Campus</option>
-                <option value="doornfontein">Doornfontein Campus</option>
-                <option value="soweto">Soweto Campus</option>
+                {campuses.map((c) => (
+                  <option key={c.id} value={c.id}>
+                    {c.name} ({c.location})
+                  </option>
+                ))}
               </select>
             </div>
           </>
         ) : (
           <>
             <div className="flex flex-col gap-2">
-              <label className="text-sm font-bold text-foreground">Store Name</label>
+              <label className="text-sm font-bold text-foreground">Store or Restaurant Name</label>
               <input 
                 type="text"
                 value={storeName}
                 onChange={(e) => setStoreName(e.target.value)}
                 className="w-full rounded-2xl border bg-card px-4 py-3 text-sm outline-none transition-all focus:border-primary focus:ring-1 focus:ring-primary shadow-sm placeholder:text-muted-foreground"
-                placeholder="e.g. Campus Grill"
+                placeholder="e.g. SML Restaurant or Doornfontein Spaza"
                 required
               />
             </div>
             
             <div className="flex flex-col gap-2">
-              <label className="text-sm font-bold text-foreground">Store Location</label>
+              <label className="text-sm font-bold text-foreground">Store Area</label>
               <select
                 value={campusId}
                 onChange={(e) => setCampusId(e.target.value)}
                 className="w-full rounded-2xl border bg-card px-4 py-3 text-sm outline-none transition-all focus:border-primary focus:ring-1 focus:ring-primary shadow-sm placeholder:text-muted-foreground"
                 required
               >
-                <option value="aucklandpark">Auckland Park Kingsway Content</option>
-                <option value="buntingroad">Bunting Road Campus</option>
-                <option value="doornfontein">Doornfontein Campus</option>
-                <option value="soweto">Soweto Campus</option>
+                {campuses.map((c) => (
+                  <option key={c.id} value={c.id}>
+                    {c.name} ({c.location})
+                  </option>
+                ))}
               </select>
             </div>
           </>
@@ -428,7 +431,7 @@ export function UserProfileView({ user, userRole, onSignOut, onGoHome, onOrders 
         <div className="flex h-24 w-24 items-center justify-center rounded-full bg-primary/10 text-3xl font-bold text-primary ring-4 ring-background shadow-lg mb-4">
           {initials}
         </div>
-        <h2 className="text-xl font-bold text-foreground">{user.displayName || 'UniEats User'}</h2>
+        <h2 className="text-xl font-bold text-foreground">{user.displayName || 'Dash User'}</h2>
         <p className="text-sm text-muted-foreground">{user.email}</p>
         <div className="mt-3 inline-flex items-center gap-1.5 rounded-full bg-accent/10 px-3 py-1 text-xs font-bold text-accent">
           {isMerchant ? <StoreIcon className="h-3.5 w-3.5" /> : <UserIcon className="h-3.5 w-3.5" />}

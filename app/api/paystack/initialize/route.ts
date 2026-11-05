@@ -74,7 +74,7 @@ export async function POST(req: NextRequest) {
             {
               display_name: 'Platform',
               variable_name: 'platform',
-              value: 'UniEats Campus Ordering',
+              value: 'Dash Food & Groceries',
             },
           ],
         },

@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200">
+  <rect width="200" height="200" fill="#ffffff"/>
+  <ellipse cx="100" cy="162" rx="66" ry="11" fill="#000000" opacity="0.08"/>
+  <rect x="28" y="48" width="144" height="106" rx="20" fill="#2b2d30" stroke="#16171a" stroke-width="3"/>
+  <rect x="44" y="62" width="112" height="78" rx="14" fill="#d93b30" stroke="#6b1d17" stroke-width="2.5"/>
+  <!-- Mince texture waves -->
+  <path d="M54 76 Q66 70 78 76 T102 76 T126 76 T146 76" fill="none" stroke="#f28b82" stroke-width="4" stroke-linecap="round"/>
+  <path d="M54 92 Q66 86 78 92 T102 92 T126 92 T146 92" fill="none" stroke="#f28b82" stroke-width="4" stroke-linecap="round"/>
+  <path d="M54 108 Q66 102 78 108 T102 108 T126 108 T146 108" fill="none" stroke="#f28b82" stroke-width="4" stroke-linecap="round"/>
+  <path d="M54 124 Q66 118 78 124 T102 124 T126 124 T146 124" fill="none" stroke="#f28b82" stroke-width="4" stroke-linecap="round"/>
+  <rect x="74" y="86" width="52" height="28" rx="6" fill="#ffffff" stroke="#2b2d30" stroke-width="2"/>
+  <rect x="82" y="95" width="36" height="5" rx="2" fill="#287d46"/>
+  <rect x="86" y="103" width="28" height="4" rx="2" fill="#c4c9ce"/>
+</svg>

@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200">
+  <rect width="200" height="200" fill="#ffffff"/>
+  <ellipse cx="105" cy="162" rx="58" ry="10" fill="#000000" opacity="0.07"/>
+  <!-- Back banana -->
+  <path d="M55 62 C52 105, 88 142, 145 130 C152 128, 156 118, 148 115 C102 122, 74 96, 70 58 Z" fill="#f4c430" stroke="#5c4312" stroke-width="3" stroke-linejoin="round"/>
+  <!-- Middle banana -->
+  <path d="M48 66 C48 116, 92 154, 154 140 C162 138, 164 126, 155 123 C105 132, 70 104, 65 62 Z" fill="#ffd93d" stroke="#5c4312" stroke-width="3" stroke-linejoin="round"/>
+  <!-- Front banana -->
+  <path d="M42 72 C46 126, 96 164, 158 148 C166 145, 166 133, 156 131 C106 142, 68 112, 60 68 Z" fill="#ffe55c" stroke="#5c4312" stroke-width="3" stroke-linejoin="round"/>
+  <!-- Crown stem -->
+  <path d="M40 56 L68 52 L72 68 L42 72 Z" fill="#7a9a3b" stroke="#5c4312" stroke-width="3" stroke-linejoin="round"/>
+</svg>

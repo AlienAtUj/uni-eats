@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 84 84" width="512" height="512">
+  <rect width="84" height="84" fill="#fbe58f"/>
+  <!-- Golden chips & Russian sticking out of quarter loaf -->
+  <rect x="26" y="18" width="7" height="22" rx="2" transform="rotate(-12 26 18)" fill="#ffd23f" stroke="#4f2d16" stroke-width="2"/>
+  <rect x="36" y="15" width="7" height="24" rx="2" fill="#ffde59" stroke="#4f2d16" stroke-width="2"/>
+  <rect x="45" y="17" width="7" height="22" rx="2" transform="rotate(10 45 17)" fill="#ffd23f" stroke="#4f2d16" stroke-width="2"/>
+  <!-- Russian sausage -->
+  <path d="M 48 28 C 56 16, 68 22, 60 36 Z" fill="#d93829" stroke="#4f2d16" stroke-width="2.2"/>
+  <!-- Melted cheese slice -->
+  <path d="M 22 36 L 62 36 L 56 46 L 42 39 L 28 45 Z" fill="#ffbe2e" stroke="#4f2d16" stroke-width="2" stroke-linejoin="round"/>
+  <!-- Hollowed quarter bread loaf -->
+  <path d="M 20 36 L 64 36 L 62 64 C 62 67, 58 68, 54 68 L 30 68 C 26 68, 22 67, 22 64 Z" fill="#d98943" stroke="#4f2d16" stroke-width="2.2" stroke-linejoin="round"/>
+  <rect x="24" y="42" width="22" height="22" rx="3" fill="#fce7be" stroke="#b36a2c" stroke-width="1.6"/>
+</svg>

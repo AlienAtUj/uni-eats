@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 84 84" width="512" height="512">
+  <rect width="84" height="84" fill="#c3e4af"/>
+  <!-- Salad/poke greens & toppings -->
+  <circle cx="32" cy="36" r="9" fill="#49a838" stroke="#285420" stroke-width="2"/>
+  <circle cx="44" cy="33" r="10" fill="#5ec248" stroke="#285420" stroke-width="2"/>
+  <circle cx="54" cy="37" r="8" fill="#e63b2e" stroke="#285420" stroke-width="2"/>
+  <!-- Bowl -->
+  <path d="M 16 40 L 68 40 C 66 58, 56 66, 42 66 C 28 66, 18 58, 16 40 Z" fill="#ffffff" stroke="#285420" stroke-width="2.2" stroke-linejoin="round"/>
+  <path d="M 22 48 L 62 48" stroke="#287d46" stroke-width="3" stroke-linecap="round"/>
+</svg>
