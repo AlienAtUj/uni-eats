@@ -31,6 +31,7 @@ import {
 } from '@/lib/firebase-db'
 
 const SERVICE_FEE = 0.99
+const FALLBACK_IMAGE = '/food/featured-burger.jpg'
 
 export type Screen =
   | 'home'
@@ -51,6 +52,7 @@ export type CartLine = {
   modifierLabels: string[]
   restaurantId: string
   restaurantName: string
+  addedAt?: number // optional so old saved carts and existing callers still work
 }
 
 export type HomeMode = 'eat' | 'shop'
@@ -59,6 +61,7 @@ type Store = {
   screen: Screen
   homeMode: HomeMode
   setHomeMode: (m: HomeMode) => void
+  // Location
   userLocation: DeliveryLocation | null
   setUserLocation: (loc: DeliveryLocation | null) => void
   recentLocations: DeliveryLocation[]
@@ -79,12 +82,17 @@ type Store = {
   activeDepartmentId: string | null
   openDepartment: (id: string) => void
   goToScreen: (s: Screen) => void
-  cart: CartLine[]
+  // Cart (multi-store)
+  cart: CartLine[] // lines of the ACTIVE cart
+  carts: Record<string, CartLine[]> // all carts keyed by restaurantId
+  activeCartId: string | null
+  setActiveCartId: (id: string) => void
   addLine: (line: Omit<CartLine, 'lineId'>) => void
   updateQty: (lineId: string, delta: number) => void
-  clearCart: () => void
-  subtotal: number
-  itemCount: number
+  clearCart: (restaurantId?: string) => void // no arg = clear ALL carts
+  subtotal: number // active cart only
+  itemCount: number // active cart only
+  totalItemCount: number // across all carts (use for the badge)
   pickupTime: string
   setPickupTime: (t: string) => void
   paymentMethod: string
@@ -117,6 +125,31 @@ export type PlacedOrder = {
   paymentStatus?: 'paid' | 'pending' | 'cash_on_pickup'
 }
 
+type Carts = Record<string, CartLine[]>
+
+function sanitizeLines(raw: any): CartLine[] {
+  if (!Array.isArray(raw)) return []
+  return raw
+    .filter(
+      (l: any) =>
+        l &&
+        typeof l.itemId === 'string' &&
+        typeof l.restaurantId === 'string' &&
+        Number.isFinite(Number(l.unitPrice)) &&
+        Number(l.unitPrice) > 0 &&
+        Number.isInteger(Number(l.quantity)) &&
+        Number(l.quantity) > 0,
+    )
+    .map((l: any) => ({
+      ...l,
+      image:
+        typeof l.image === 'string' && l.image.trim() ? l.image.trim() : FALLBACK_IMAGE,
+      unitPrice: Number(l.unitPrice),
+      quantity: Math.min(99, Number(l.quantity)),
+      modifierLabels: Array.isArray(l.modifierLabels) ? l.modifierLabels : [],
+    }))
+}
+
 const StoreContext = createContext<Store | null>(null)
 
 export function StoreProvider({ children }: { children: ReactNode }) {
@@ -130,10 +163,18 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   const [locationError, setLocationError] = useState<string | null>(null)
   const [activeId, setActiveId] = useState<string | null>(null)
   const [activeDepartmentId, setActiveDepartmentId] = useState<string | null>(null)
-  const [cart, setCart] = useState<CartLine[]>([])
+  const [carts, setCarts] = useState<Carts>({})
+  const [selectedCartId, setSelectedCartId] = useState<string | null>(null)
   const [pickupTime, setPickupTime] = useState('As soon as possible')
   const [paymentMethod, setPaymentMethod] = useState('Paystack (Card / EFT / SnapScan)')
   const [placedOrder, setPlacedOrder] = useState<PlacedOrder | null>(null)
+
+  // Resolved active cart: selected one if it still exists, else the first cart
+  const activeCartId =
+    selectedCartId && carts[selectedCartId]
+      ? selectedCartId
+      : Object.keys(carts)[0] ?? null
+  const cart: CartLine[] = activeCartId ? carts[activeCartId] ?? [] : []
 
   const saveRecentLocation = (loc: DeliveryLocation) => {
     setRecentLocations((prev) => {
@@ -190,12 +231,12 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           setIsLocatingGps(false)
           resolve(null)
         },
-        { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }
+        { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 },
       )
     })
   }
 
-  // Hydrate cart, active order, and real-time location on mount
+  // Hydrate location, carts and active order from storage on mount
   useEffect(() => {
     try {
       // Remove any legacy fake fallback keys
@@ -208,8 +249,9 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         if (Array.isArray(parsedRecents)) {
           setRecentLocations(
             parsedRecents.filter(
-              (r: any) => r && r.coords && Number.isFinite(r.coords.lat) && Number.isFinite(r.coords.lng)
-            )
+              (r: any) =>
+                r && r.coords && Number.isFinite(r.coords.lat) && Number.isFinite(r.coords.lng),
+            ),
           )
         }
       }
@@ -217,7 +259,12 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       const savedLoc = localStorage.getItem('dash_live_location')
       if (savedLoc) {
         const parsed = JSON.parse(savedLoc)
-        if (parsed && parsed.coords && Number.isFinite(parsed.coords.lat) && Number.isFinite(parsed.coords.lng)) {
+        if (
+          parsed &&
+          parsed.coords &&
+          Number.isFinite(parsed.coords.lat) &&
+          Number.isFinite(parsed.coords.lng)
+        ) {
           setUserLocationState(parsed)
           setCustomLocationLabel(parsed.label)
           setIsLocatingGps(false)
@@ -228,38 +275,29 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         detectUserLocation()
       }
 
-      const savedCart = localStorage.getItem('unieats_cart')
-      if (savedCart) {
-        const parsed = JSON.parse(savedCart)
-        if (Array.isArray(parsed)) {
-          const validLines = parsed
-            .filter(
-              (l: any) =>
-                l &&
-                typeof l.itemId === 'string' &&
-                typeof l.restaurantId === 'string' &&
-                Number.isFinite(Number(l.unitPrice)) &&
-                Number(l.unitPrice) > 0 &&
-                Number.isInteger(Number(l.quantity)) &&
-                Number(l.quantity) > 0
-            )
-            .map((l: any) => ({
-              ...l,
-              image:
-                typeof l.image === 'string' && l.image.trim()
-                  ? l.image.trim()
-                  : '/food/featured-burger.jpg',
-              unitPrice: Number(l.unitPrice),
-              quantity: Math.min(99, Number(l.quantity)),
-              modifierLabels: Array.isArray(l.modifierLabels) ? l.modifierLabels : [],
-            }))
-          // Ensure cart only contains items from a single restaurant
-          if (validLines.length > 0) {
-            const primaryRestId = validLines[0].restaurantId
-            setCart(validLines.filter((l: CartLine) => l.restaurantId === primaryRestId))
+      const loaded: Carts = {}
+
+      const savedCarts = localStorage.getItem('unieats_carts')
+      if (savedCarts) {
+        const parsed = JSON.parse(savedCarts)
+        if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+          for (const [rid, lines] of Object.entries(parsed)) {
+            const valid = sanitizeLines(lines).filter((l) => l.restaurantId === rid)
+            if (valid.length) loaded[rid] = valid
           }
         }
+      } else {
+        // Migrate old single-cart format
+        const oldCart = localStorage.getItem('unieats_cart')
+        if (oldCart) {
+          for (const l of sanitizeLines(JSON.parse(oldCart))) {
+            loaded[l.restaurantId] = [...(loaded[l.restaurantId] ?? []), l]
+          }
+          localStorage.removeItem('unieats_cart')
+        }
       }
+      if (Object.keys(loaded).length) setCarts(loaded)
+
       const savedOrder = localStorage.getItem('unieats_active_order')
       if (savedOrder) {
         setPlacedOrder(JSON.parse(savedOrder))
@@ -283,14 +321,14 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     }
   }, [])
 
-  // Persist cart to localStorage whenever it changes
+  // Persist carts to localStorage whenever they change
   useEffect(() => {
     try {
-      localStorage.setItem('unieats_cart', JSON.stringify(cart))
+      localStorage.setItem('unieats_carts', JSON.stringify(carts))
     } catch (e) {
-      console.warn('Failed to persist cart:', e)
+      console.warn('Failed to persist carts:', e)
     }
-  }, [cart])
+  }, [carts])
 
   // Persist placedOrder to localStorage whenever it changes
   useEffect(() => {
@@ -360,7 +398,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
                   image:
                     typeof it.image === 'string' && it.image.trim()
                       ? it.image.trim()
-                      : '/food/featured-burger.jpg',
+                      : FALLBACK_IMAGE,
                   quantity: it.quantity || 1,
                   unitPrice: it.price || 0,
                   modifierLabels: (it.modifiers || []).map((m: any) => m.label),
@@ -382,6 +420,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         }
       } else {
         setUserRole(null)
+        // Logged out: don't keep showing a previous user's order
+        setPlacedOrder(null)
       }
       setIsAuthLoading(false)
     })
@@ -406,7 +446,15 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     () => cart.reduce((sum, l) => sum + (Number(l.quantity) || 0), 0),
     [cart],
   )
+  const totalItemCount = useMemo(
+    () =>
+      Object.values(carts)
+        .flat()
+        .reduce((sum, l) => sum + (Number(l.quantity) || 0), 0),
+    [carts],
+  )
 
+  // Geocode stores that have an address but no coordinates
   const [, setGeoTick] = useState(0)
 
   useEffect(() => {
@@ -451,7 +499,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     if (!Number.isFinite(dist)) return false
     const maxRadius = Math.min(
       store.deliveryRadiusKm || SERVICE_DELIVERY_RADIUS_KM,
-      SERVICE_DELIVERY_RADIUS_KM
+      SERVICE_DELIVERY_RADIUS_KM,
     )
     return dist <= maxRadius
   }
@@ -502,83 +550,97 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     },
     goToScreen: handleSetScreen,
     cart,
-    addLine: (line) =>
-      setCart((prev) => {
-        const safeUnitPrice = Math.max(0, Number(line.unitPrice) || 0)
-        const safeQty = Math.max(1, Math.min(99, Math.round(Number(line.quantity) || 1)))
-        const safeImage =
-          typeof line.image === 'string' && line.image.trim()
-            ? line.image.trim()
-            : '/food/featured-burger.jpg'
+    carts,
+    activeCartId,
+    setActiveCartId: setSelectedCartId,
+    addLine: (line) => {
+      const safeUnitPrice = Math.max(0, Number(line.unitPrice) || 0)
+      const safeQty = Math.max(1, Math.min(99, Math.round(Number(line.quantity) || 1)))
+      const safeImage =
+        typeof line.image === 'string' && line.image.trim()
+          ? line.image.trim()
+          : FALLBACK_IMAGE
+      const rid = line.restaurantId
 
-        if (prev.length > 0 && prev[0].restaurantId !== line.restaurantId) {
-          const replace =
-            typeof window !== 'undefined'
-              ? window.confirm(
-                  `Your cart contains items from ${prev[0].restaurantName}. Clear cart and start a new order from ${line.restaurantName}?`
-                )
-              : true
-          if (!replace) return prev
-          return [
-            {
-              ...line,
-              image: safeImage,
-              unitPrice: safeUnitPrice,
-              quantity: safeQty,
-              lineId: crypto.randomUUID(),
-            },
-          ]
-        }
-
+      setCarts((prev) => {
+        const now = Date.now()
+        const lines = prev[rid] ?? []
         const key = line.itemId + '|' + line.modifierLabels.join(',')
-        const existing = prev.find(
+        const existing = lines.find(
           (l) => l.itemId + '|' + l.modifierLabels.join(',') === key,
         )
-        if (existing) {
-          return prev.map((l) =>
-            l.lineId === existing.lineId
-              ? { ...l, quantity: Math.min(99, l.quantity + safeQty) }
-              : l,
-          )
-        }
-        return [
-          ...prev,
-          {
-            ...line,
-            image: safeImage,
-            unitPrice: safeUnitPrice,
-            quantity: safeQty,
-            lineId: crypto.randomUUID(),
-          },
-        ]
-      }),
-    updateQty: (lineId, delta) =>
-      setCart((prev) =>
-        prev
+        const nextLines = existing
+          ? lines.map((l) =>
+              l.lineId === existing.lineId
+                ? { ...l, quantity: Math.min(99, l.quantity + safeQty), addedAt: now }
+                : l,
+            )
+          : [
+              ...lines,
+              {
+                ...line,
+                image: safeImage,
+                unitPrice: safeUnitPrice,
+                quantity: safeQty,
+                lineId: crypto.randomUUID(),
+                addedAt: now,
+              },
+            ]
+        return { ...prev, [rid]: nextLines }
+      })
+      // Switch to the cart you just added to
+      setSelectedCartId(rid)
+    },
+    updateQty: (lineId, delta) => {
+      if (!activeCartId) return
+      const rid = activeCartId
+      setCarts((prev) => {
+        const lines = (prev[rid] ?? [])
           .map((l) =>
             l.lineId === lineId
               ? { ...l, quantity: Math.min(99, Math.max(0, l.quantity + delta)) }
               : l,
           )
-          .filter((l) => l.quantity > 0),
-      ),
-    clearCart: () => {
-      setCart([])
-      try {
-        localStorage.removeItem('unieats_cart')
-      } catch (_e) {
-        // Ignore storage errors
+          .filter((l) => l.quantity > 0)
+        const next = { ...prev }
+        if (lines.length) next[rid] = lines
+        else delete next[rid]
+        return next
+      })
+    },
+    clearCart: (restaurantId) => {
+      if (!restaurantId) {
+        setCarts({})
+        setSelectedCartId(null)
+        try {
+          localStorage.removeItem('unieats_carts')
+        } catch (_e) {
+          // Ignore storage errors
+        }
+        return
       }
+      setCarts((prev) => {
+        const next = { ...prev }
+        delete next[restaurantId]
+        return next
+      })
     },
     subtotal,
     itemCount,
+    totalItemCount,
     pickupTime,
     setPickupTime,
     paymentMethod,
     setPaymentMethod,
     placedOrder,
     placeOrder: async (paymentMeta) => {
-      if (cart.length === 0) return
+      if (!user) {
+        throw new Error('You must be signed in to place an order')
+      }
+      if (cart.length === 0 || !activeCartId) return
+
+      const orderLines = cart
+      const orderCartId = activeCartId
       const campusName =
         customLocationLabel ||
         (campuses.find((c) => c.id === campusId)?.name ?? campuses[0].name)
@@ -587,19 +649,19 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         typeof paymentMeta?.verifiedTotalZar === 'number' && paymentMeta.verifiedTotalZar > 0
           ? paymentMeta.verifiedTotalZar
           : subtotal + SERVICE_FEE
-      const merchantId = cart[0].restaurantId
-      const merchantName = cart[0].restaurantName
+      const merchantId = orderLines[0].restaurantId
+      const merchantName = orderLines[0].restaurantName
 
       let firestoreDocId: string | undefined = undefined
 
       try {
         firestoreDocId = await createOrder({
           orderId: orderDisplayId,
-          customerId: user?.uid || 'guest-user',
-          customerName: user?.displayName || user?.email?.split('@')[0] || 'Campus Student',
+          customerId: user.uid,
+          customerName: user.displayName || user.email?.split('@')[0] || 'Campus Student',
           merchantId,
           merchantName,
-          items: cart.map((line) => ({
+          items: orderLines.map((line) => ({
             id: line.itemId,
             name: line.name,
             price: line.unitPrice,
@@ -622,7 +684,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       setPlacedOrder({
         id: orderDisplayId,
         firestoreId: firestoreDocId,
-        lines: cart,
+        lines: orderLines,
         total,
         restaurantName: merchantName,
         pickupTime,
@@ -631,12 +693,13 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         paymentReference: paymentMeta?.paymentReference,
         paymentStatus: paymentMeta?.paymentStatus || 'cash_on_pickup',
       })
-      setCart([])
-      try {
-        localStorage.removeItem('unieats_cart')
-      } catch (_e) {
-        // Ignore storage errors
-      }
+
+      // Remove only the cart that was ordered; other store carts stay
+      setCarts((prev) => {
+        const next = { ...prev }
+        delete next[orderCartId]
+        return next
+      })
       handleSetScreen('tracking')
     },
     user,
@@ -654,4 +717,3 @@ export function useStore() {
   if (!ctx) throw new Error('useStore must be used within StoreProvider')
   return ctx
 }
-
