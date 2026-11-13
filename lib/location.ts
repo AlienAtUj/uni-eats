@@ -16,6 +16,8 @@ export type DeliveryLocation = {
   address?: string
   coords: Coordinates
   isGps?: boolean
+  isApproximate?: boolean
+  accuracy?: number
 }
 
 /** Standard automatic delivery zone radius cutoff in km (like Sixty60 / Uber Eats / Mr D). Stores beyond this distance are never shown. */
@@ -731,8 +733,28 @@ function deduplicateLocations(lists: DeliveryLocation[][]): DeliveryLocation[] {
 }
 
 /**
+ * Provider 0: Google Maps Geocoding & Places Search (when API key is present)
+ */
+async function searchGoogleZa(query: string, signal?: AbortSignal): Promise<DeliveryLocation[]> {
+  try {
+    const res = await fetch(
+      `/api/location?action=search&q=${encodeURIComponent(query)}`,
+      { signal }
+    )
+    if (!res.ok) return []
+    const data = await res.json()
+    if (Array.isArray(data?.results)) {
+      return data.results
+    }
+    return []
+  } catch {
+    return []
+  }
+}
+
+/**
  * Multi-engine, typo-tolerant real-time location search across all of South Africa.
- * Combines ArcGIS World Geocoder + Photon Autocomplete + Nominatim + Local Fuzzy Gazetteer.
+ * Combines Google Places/Geocoding + ArcGIS World Geocoder + Photon Autocomplete + Nominatim + Local Fuzzy Gazetteer.
  */
 export async function searchAddresses(
   rawQuery: string,
@@ -755,8 +777,9 @@ export async function searchAddresses(
   }
 
   try {
-    // 2. Query ArcGIS (best for streets/numbers/typos), Photon (fast OSM autocomplete), and Nominatim in parallel
+    // 2. Query Google Maps (if key exists), ArcGIS (street addresses/malls/complexes), Photon, and Nominatim in parallel
     const queriesToRun: Promise<DeliveryLocation[]>[] = [
+      searchGoogleZa(correctedQuery, signal),
       searchArcGisZa(correctedQuery, signal),
       searchPhotonZa(correctedQuery, signal),
       searchNominatimZa(correctedQuery, signal),
@@ -764,6 +787,7 @@ export async function searchAddresses(
 
     // If typo correction changed the string, also query ArcGIS with the raw input in case it's a unique street name
     if (correctedQuery.toLowerCase() !== q.toLowerCase()) {
+      queriesToRun.push(searchGoogleZa(q, signal))
       queriesToRun.push(searchArcGisZa(q, signal))
     }
 
@@ -772,13 +796,15 @@ export async function searchAddresses(
       r.status === 'fulfilled' ? r.value : []
     )
 
-    // Prioritize exact/high-confidence instant suburb matches + live street/building API results
+    // Prioritize Google Places + ArcGIS street results, followed by local gazetteer and OSM
     const combined = deduplicateLocations([
       apiLists[0] || [],
       apiLists[1] || [],
-      instantMatches,
       apiLists[2] || [],
+      instantMatches,
       apiLists[3] || [],
+      apiLists[4] || [],
+      apiLists[5] || [],
     ])
 
     if (combined.length > 0) {
@@ -790,85 +816,216 @@ export async function searchAddresses(
   }
 }
 
+/**
+ * High-Precision True Client GPS Detection:
+ * 1. Uses native browser `navigator.geolocation.getCurrentPosition` with `enableHighAccuracy: true`.
+ * 2. On mobile devices with GPS chip, this achieves 5m - 20m meter-level accuracy.
+ * 3. Inspects `coords.accuracy`. If accuracy is coarse (> 300m, e.g. on desktop PCs without GPS),
+ *    flags `isApproximate: true` so the UI can prompt the user to confirm or select their exact address.
+ * 4. Reverse-geocodes via Google Maps Geocoding API + ArcGIS World Geocoder.
+ */
+export async function detectAccurateUserLocation(): Promise<DeliveryLocation | null> {
+  if (typeof window === 'undefined' || !('geolocation' in navigator)) {
+    return null
+  }
+
+  return new Promise((resolve) => {
+    let resolved = false
+    let bestFix: { lat: number; lng: number; accuracy: number } | null = null
+
+    const finish = async (fix: { lat: number; lng: number; accuracy: number } | null) => {
+      if (resolved) return
+      resolved = true
+      if (!fix) {
+        resolve(null)
+        return
+      }
+
+      try {
+        const location = await reverseGeocodeCoords(fix.lat, fix.lng)
+        location.accuracy = fix.accuracy
+        location.isGps = true
+        location.isApproximate = fix.accuracy > 300
+        resolve(location)
+      } catch {
+        resolve({
+          label: `${fix.lat.toFixed(4)}, ${fix.lng.toFixed(4)}`,
+          coords: { lat: fix.lat, lng: fix.lng },
+          isGps: true,
+          accuracy: fix.accuracy,
+          isApproximate: fix.accuracy > 300,
+        })
+      }
+    }
+
+    // Safety timeout: 4.5 seconds maximum so the app never freezes
+    const timeoutTimer = setTimeout(() => {
+      finish(bestFix)
+    }, 4500)
+
+    try {
+      // 1. Initial quick high-accuracy fix
+      navigator.geolocation.getCurrentPosition(
+        (pos) => {
+          const acc = pos.coords.accuracy || 100
+          bestFix = {
+            lat: pos.coords.latitude,
+            lng: pos.coords.longitude,
+            accuracy: acc,
+          }
+          // If true hardware GPS accuracy (<= 50 meters), finish immediately!
+          if (acc <= 50) {
+            clearTimeout(timeoutTimer)
+            finish(bestFix)
+          }
+        },
+        () => {
+          // If immediate fix errored, wait for watch or timeout
+        },
+        { enableHighAccuracy: true, timeout: 3500, maximumAge: 0 }
+      )
+
+      // 2. Watch position for refined GPS lock
+      const watchId = navigator.geolocation.watchPosition(
+        (pos) => {
+          const acc = pos.coords.accuracy || 100
+          if (!bestFix || acc < bestFix.accuracy) {
+            bestFix = {
+              lat: pos.coords.latitude,
+              lng: pos.coords.longitude,
+              accuracy: acc,
+            }
+          }
+          if (acc <= 50) {
+            clearTimeout(timeoutTimer)
+            try {
+              navigator.geolocation.clearWatch(watchId)
+            } catch {}
+            finish(bestFix)
+          }
+        },
+        () => {
+          // Ignore watch error; fallback to bestFix on timeout
+        },
+        { enableHighAccuracy: true, timeout: 4000, maximumAge: 0 }
+      )
+    } catch {
+      clearTimeout(timeoutTimer)
+      finish(null)
+    }
+  })
+}
+
 /** Reverse geocodes live GPS latitude/longitude into a street/suburb delivery address */
 export async function reverseGeocodeCoords(lat: number, lng: number): Promise<DeliveryLocation> {
-  // Try ArcGIS Reverse Geocode & Nominatim in parallel for fastest response
+  // Query Google Maps Reverse Geocoding API + ArcGIS World Geocoder in parallel
   try {
-    const arcGisUrl = `https://geocode.arcgis.com/arcgis/rest/services/World/GeocodeServer/reverseGeocode?location=${lng},${lat}&f=json`
+    const googleUrl = `/api/location?action=reverse&lat=${encodeURIComponent(lat)}&lng=${encodeURIComponent(lng)}`
+    // Note: ArcGIS reverseGeocode requires x=lng, y=lat
+    const arcGisUrl = `https://geocode.arcgis.com/arcgis/rest/services/World/GeocodeServer/reverseGeocode?location=${lng},${lat}&outSR=4326&f=json`
     const nominatimUrl = `https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lng}&zoom=18&addressdetails=1`
 
-    const [arcRes, nomRes] = await Promise.allSettled([
+    const [googleRes, arcRes, nomRes] = await Promise.allSettled([
+      fetch(googleUrl),
       fetch(arcGisUrl),
       fetch(nominatimUrl, { headers: { 'Accept-Language': 'en' } }),
     ])
 
-    if (arcRes.status === 'fulfilled' && arcRes.value.ok) {
-      const arcData = await arcRes.value.json()
-      const addr = arcData?.address
-      if (addr) {
-        const street = addr.Address || ''
-        const suburb = addr.Neighborhood || addr.District || ''
-        const city = addr.City || addr.Subregion || ''
-        const fullLabel = addr.LongLabel || addr.ShortLabel || ''
-        const display =
-          [street, suburb || city].filter(Boolean).join(', ') ||
-          fullLabel.split(',').slice(0, 2).join(', ').trim()
-
-        if (display) {
-          return {
-            label: display,
-            suburb: suburb || city,
-            city,
-            address: fullLabel || display,
-            coords: { lat, lng },
-            isGps: true,
-          }
+    // 1. Google Maps Reverse Geocode (if key is enabled)
+    if (googleRes.status === 'fulfilled' && googleRes.value.ok) {
+      try {
+        const gData = await googleRes.value.json()
+        if (gData?.location && gData.location.label) {
+          return gData.location as DeliveryLocation
         }
-      }
+      } catch {}
     }
 
+    // 2. ArcGIS World Geocoder (South Africa - extremely accurate down to street & building numbers)
+    if (arcRes.status === 'fulfilled' && arcRes.value.ok) {
+      try {
+        const arcData = await arcRes.value.json()
+        const addr = arcData?.address
+        if (addr) {
+          const street = addr.Address || addr.StAddr || ''
+          const suburb = addr.Neighborhood || addr.District || ''
+          const city = addr.City || addr.Subregion || ''
+          const matchAddr = addr.Match_addr || addr.LongLabel || addr.ShortLabel || ''
+
+          let display = ''
+          if (street && suburb) {
+            display = `${street}, ${suburb}`
+          } else if (street && city) {
+            display = `${street}, ${city}`
+          } else if (suburb && city && suburb.toLowerCase() !== city.toLowerCase()) {
+            display = `${suburb}, ${city}`
+          } else if (suburb) {
+            display = suburb
+          } else if (street) {
+            display = street
+          } else {
+            display = matchAddr.split(',').slice(0, 2).join(', ').trim()
+          }
+
+          if (display) {
+            return {
+              label: display,
+              suburb: suburb || city,
+              city,
+              address: matchAddr || display,
+              coords: { lat, lng },
+              isGps: true,
+            }
+          }
+        }
+      } catch {}
+    }
+
+    // 3. OpenStreetMap Nominatim
     if (nomRes.status === 'fulfilled' && nomRes.value.ok) {
-      const data = await nomRes.value.json()
-      const addr = data.address || {}
-      const houseNumber = addr.house_number || ''
-      const road = addr.road || addr.street || addr.pedestrian || ''
-      const suburb =
-        addr.suburb ||
-        addr.neighbourhood ||
-        addr.quarter ||
-        addr.residential ||
-        addr.city_district ||
-        addr.town ||
-        addr.village ||
-        ''
-      const city = addr.city || addr.town || addr.municipality || addr.county || ''
+      try {
+        const data = await nomRes.value.json()
+        const addr = data.address || {}
+        const houseNumber = addr.house_number || ''
+        const road = addr.road || addr.street || addr.pedestrian || ''
+        const suburb =
+          addr.suburb ||
+          addr.neighbourhood ||
+          addr.quarter ||
+          addr.residential ||
+          addr.city_district ||
+          addr.town ||
+          addr.village ||
+          ''
+        const city = addr.city || addr.town || addr.municipality || addr.county || ''
 
-      const streetPart = [houseNumber, road].filter(Boolean).join(' ').trim()
-      let display = ''
-      if (streetPart && suburb) {
-        display = `${streetPart}, ${suburb}`
-      } else if (streetPart && city) {
-        display = `${streetPart}, ${city}`
-      } else if (suburb && city && suburb !== city) {
-        display = `${suburb}, ${city}`
-      } else if (suburb) {
-        display = suburb
-      } else if (city) {
-        display = city
-      } else {
-        display =
-          data.display_name?.split(',').slice(0, 2).join(', ').trim() ||
-          `${lat.toFixed(4)}, ${lng.toFixed(4)}`
-      }
+        const streetPart = [houseNumber, road].filter(Boolean).join(' ').trim()
+        let display = ''
+        if (streetPart && suburb) {
+          display = `${streetPart}, ${suburb}`
+        } else if (streetPart && city) {
+          display = `${streetPart}, ${city}`
+        } else if (suburb && city && suburb !== city) {
+          display = `${suburb}, ${city}`
+        } else if (suburb) {
+          display = suburb
+        } else if (city) {
+          display = city
+        } else {
+          display =
+            data.display_name?.split(',').slice(0, 2).join(', ').trim() ||
+            `${lat.toFixed(4)}, ${lng.toFixed(4)}`
+        }
 
-      return {
-        label: display,
-        suburb: suburb || city,
-        city,
-        address: data.display_name || display,
-        coords: { lat, lng },
-        isGps: true,
-      }
+        return {
+          label: display,
+          suburb: suburb || city,
+          city,
+          address: data.display_name || display,
+          coords: { lat, lng },
+          isGps: true,
+        }
+      } catch {}
     }
   } catch (err) {
     console.warn('Reverse geocode notice:', err)

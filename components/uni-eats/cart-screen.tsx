@@ -2,7 +2,8 @@
 
 import { useMemo, useState } from 'react'
 import Image from 'next/image'
-import { campuses, restaurants, formatPrice } from '@/lib/data'
+import { campuses, formatPrice } from '@/lib/data'
+import { useFirebaseRestaurants } from '@/lib/firebase-db'
 import { calculateDeliveryFeeAmount, formatDistanceKm } from '@/lib/location'
 import { useStore } from './store'
 import {
@@ -199,11 +200,12 @@ function CartDetail({
   onCheckout: () => void
 }) {
   const { updateQty, getStoreDistanceKm } = useStore()
+  const { restaurants: liveRestaurants } = useFirebaseRestaurants()
 
   const restaurantId = lines[0].restaurantId
   const restaurant = useMemo(
-    () => restaurants.find((r) => r.id === restaurantId) ?? null,
-    [restaurantId],
+    () => liveRestaurants?.find((r) => r.id === restaurantId) ?? null,
+    [liveRestaurants, restaurantId],
   )
 
   const storeDistanceKm = useMemo(

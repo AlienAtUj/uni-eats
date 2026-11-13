@@ -1,0 +1,54 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Helper functions
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+
+    // User profiles
+    match /users/{userId} {
+      allow read: if true;
+      allow create, update: if isOwner(userId);
+      allow delete: if false;
+    }
+
+    // Store / Restaurant profiles
+    match /restaurants/{restaurantId} {
+      allow read: if true;
+      allow create, update: if isAuthenticated();
+      allow delete: if isAuthenticated() && (resource == null || resource.data.merchantId == request.auth.uid || restaurantId == request.auth.uid);
+    }
+
+    // Product Catalog
+    match /products/{productId} {
+      allow read: if true;
+      allow create: if isAuthenticated() && request.resource.data.merchantId == request.auth.uid;
+      allow update, delete: if isAuthenticated() && (resource.data.merchantId == request.auth.uid || resource == null);
+    }
+
+    // Customer & Merchant Orders
+    match /orders/{orderId} {
+      allow read: if isAuthenticated() && (
+        resource.data.customerId == request.auth.uid ||
+        resource.data.merchantId == request.auth.uid
+      );
+      allow create: if isAuthenticated() && request.resource.data.customerId == request.auth.uid;
+      allow update: if isAuthenticated() && (
+        resource.data.customerId == request.auth.uid ||
+        resource.data.merchantId == request.auth.uid
+      );
+      allow delete: if false; // Orders should never be deleted by clients
+    }
+
+    // Default deny all other collections
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}
+

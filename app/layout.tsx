@@ -10,7 +10,7 @@ const jakarta = Plus_Jakarta_Sans({
 })
 
 export const metadata: Metadata = {
-  title: 'Dash — Good Food. Great Times.',
+  title: 'Dash — Stores and Eats ASAP',
   description:
     'Order meals and groceries fast from restaurants and stores near you. Featured meals, local shops, and quick delivery with Dash.',
   applicationName: 'Dash',

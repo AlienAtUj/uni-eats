@@ -31,6 +31,7 @@ import {
   searchAddresses,
   searchInstantLocations,
   geocodeStoreAddress,
+  detectAccurateUserLocation,
   reverseGeocodeCoords,
   SERVICE_DELIVERY_RADIUS_KM,
 } from '@/lib/location'
@@ -273,32 +274,23 @@ export default function StoreOwnerDashboard() {
     }
   }, [storeAddressQuery])
 
-  const handleUseStoreGpsLocation = () => {
-    if (typeof window === 'undefined' || !('geolocation' in navigator)) {
-      alert('GPS location is not supported in this browser.')
-      return
-    }
+  const handleUseStoreGpsLocation = async () => {
     setIsLocatingStoreGps(true)
-    navigator.geolocation.getCurrentPosition(
-      async (pos) => {
-        try {
-          const resolved = await reverseGeocodeCoords(pos.coords.latitude, pos.coords.longitude)
-          setNewStoreLocation(resolved.label)
-          setNewStoreCoords(resolved.coords)
-          setStoreAddressQuery('')
-          setStoreAddressResults([])
-        } catch {
-          alert('Could not resolve address from GPS.')
-        } finally {
-          setIsLocatingStoreGps(false)
-        }
-      },
-      () => {
-        setIsLocatingStoreGps(false)
-        alert('Location permission denied. Please search your street address.')
-      },
-      { enableHighAccuracy: true, timeout: 10000 }
-    )
+    try {
+      const resolved = await detectAccurateUserLocation()
+      if (resolved) {
+        setNewStoreLocation(resolved.label)
+        setNewStoreCoords(resolved.coords)
+        setStoreAddressQuery('')
+        setStoreAddressResults([])
+      } else {
+        alert('Location permission denied or unavailable. Please search your street address.')
+      }
+    } catch {
+      alert('Could not resolve address from GPS.')
+    } finally {
+      setIsLocatingStoreGps(false)
+    }
   }
 
   const handleQuickSwitchStoreType = async (nextType: StoreType) => {
@@ -588,7 +580,7 @@ export default function StoreOwnerDashboard() {
                       onChange={(e) => setSearchQuery(e.target.value)}
                       placeholder={
                         activeTab === 'orders'
-                          ? 'Search order ID, student, or meal...'
+                          ? 'Search order ID, customer, or meal...'
                           : 'Search your menu items...'
                       }
                       className="w-full bg-transparent text-sm placeholder:text-muted-foreground focus:outline-none"
@@ -779,7 +771,7 @@ export default function StoreOwnerDashboard() {
                                   )}
                                 </div>
                                 <p className="mt-0.5 truncate text-xs text-muted-foreground">
-                                  {order.customerName || 'Campus Student'} ·{' '}
+                                  {order.customerName || 'Dash Customer'} ·{' '}
                                   {order.pickupTime || storePickupTime}
                                 </p>
                               </div>
@@ -894,7 +886,7 @@ export default function StoreOwnerDashboard() {
                           No orders found
                         </p>
                         <p className="mx-auto mt-1 max-w-xs text-xs text-muted-foreground">
-                          Student orders placed for {merchantName} will appear here in real time.
+                          Customer orders placed for {merchantName} will appear here in real time.
                         </p>
                       </div>
                     )}

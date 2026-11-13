@@ -11,8 +11,9 @@ import { BottomSheet } from './sheet'
 
 /** Returns the quantity of a (modifier-free) product in the cart and helpers to change it. */
 export function useProductQty(item: MenuItem, store: Restaurant) {
-  const { cart, addLine, updateQty } = useStore()
-  const line = cart.find((l) => l.itemId === item.id && l.modifierLabels.length === 0)
+  const { carts, addLine, updateQty } = useStore()
+  const storeLines = carts[store.id] ?? []
+  const line = storeLines.find((l) => l.itemId === item.id && l.modifierLabels.length === 0)
   const qty = line?.quantity ?? 0
 
   const add = () =>

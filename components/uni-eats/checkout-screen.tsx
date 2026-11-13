@@ -1,7 +1,8 @@
 'use client'
 
 import { useState, useEffect, useMemo } from 'react'
-import { restaurants, formatPrice } from '@/lib/data'
+import { formatPrice } from '@/lib/data'
+import { useFirebaseRestaurants } from '@/lib/firebase-db'
 import { calculateDeliveryFeeAmount, formatDistanceKm } from '@/lib/location'
 import { useStore } from './store'
 import { BottomSheet } from './sheet'
@@ -64,14 +65,31 @@ export function CheckoutScreen() {
     placeOrder,
     user,
   } = useStore()
+  const { restaurants: liveRestaurants } = useFirebaseRestaurants()
   const [sheet, setSheet] = useState<'time' | 'payment' | null>(null)
   const [isProcessingPayment, setIsProcessingPayment] = useState(false)
   const [paymentError, setPaymentError] = useState<string | null>(null)
 
   const orderRestaurant = useMemo(() => {
     if (cart.length === 0) return null
-    return restaurants.find((r) => r.id === cart[0].restaurantId) || null
-  }, [cart])
+    const found = liveRestaurants?.find((r) => r.id === cart[0].restaurantId)
+    if (found) return found
+    return {
+      id: cart[0].restaurantId,
+      name: cart[0].restaurantName || 'Store',
+      storeType: 'restaurant' as const,
+      location: '',
+      open: true,
+      campusIds: [],
+      cuisine: 'Food & Meals',
+      image: cart[0].image || '/food/featured-burger.jpg',
+      rating: 5.0,
+      reviews: 0,
+      pickupTime: '15-25 min',
+      priceLevel: 'R 25.00',
+      menu: [],
+    }
+  }, [cart, liveRestaurants])
 
   const storeDistanceKm = useMemo(() => {
     if (!orderRestaurant) return 1.5
@@ -102,7 +120,7 @@ export function CheckoutScreen() {
   const handleCheckout = async () => {
     setPaymentError(null)
 
-    // If student chose Cash on Pickup, place order directly marked as cash_on_pickup
+    // If customer chose Cash on Pickup, place order directly marked as cash_on_pickup
     if (paymentMethod === 'Cash on Pickup') {
       setIsProcessingPayment(true)
       try {

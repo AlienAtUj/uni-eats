@@ -37,16 +37,7 @@ export default function LoginPage() {
 
   return (
     <div className="flex min-h-full flex-col bg-background px-6 py-8">
-      <header className="mb-8">
-        <Link 
-          href="/" 
-          className="inline-flex h-10 w-10 items-center justify-center rounded-full bg-muted/50 text-foreground transition-colors hover:bg-muted"
-        >
-          <ArrowLeftIcon className="h-5 w-5" />
-        </Link>
-      </header>
-
-      <div className="mb-10 text-center">
+      <div className="mb-8 mt-2 text-center">
         <div className="mx-auto mb-6 flex h-20 w-20 items-center justify-center overflow-hidden rounded-[1.5rem] bg-[oklch(0.22_0.04_150)] shadow-sm ring-1 ring-border/50">
           <Image 
             src="/dash-logo.jpg" 
@@ -56,8 +47,8 @@ export default function LoginPage() {
             className="h-full w-full object-cover" 
           />
         </div>
-        <h1 className="text-2xl font-extrabold tracking-tight text-foreground">Welcome back</h1>
-        <p className="mt-2 text-sm text-muted-foreground">Sign in to your Dash account to continue.</p>
+        <h1 className="text-2xl font-extrabold tracking-tight text-foreground">Welcome to Dash</h1>
+        <p className="mt-2 text-sm text-muted-foreground">Sign in to browse stores, meals & order delivery.</p>
       </div>
 
       <form onSubmit={handleSubmit} className="flex flex-col gap-5">

@@ -2,7 +2,7 @@
 
 import Image from 'next/image'
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { restaurants, type MenuItem, type Restaurant } from '@/lib/data'
+import { type MenuItem, type Restaurant } from '@/lib/data'
 import {
   DASH_MARKET_ID,
   DEPARTMENTS,
@@ -21,7 +21,7 @@ import { cn } from '@/lib/utils'
 
 export function useDashMarket(): Restaurant {
   return useMemo(
-    () => restaurants.find((r) => r.id === DASH_MARKET_ID) ?? buildDashMarket([]),
+    () => buildDashMarket([]),
     []
   )
 }
@@ -55,8 +55,7 @@ export function ShopCategoryScreen() {
   const activeCategory: Department =
     allCategoryTabs.find((d) => d.id === activeDepartmentId) ?? allCategoryTabs[0]
 
-  const allEntries =
-    liveRestaurants && liveRestaurants.length > 0 ? liveRestaurants : restaurants
+  const allEntries = liveRestaurants || []
 
   // Enrich in-range stores with real-time distance & sort by shortest distance first
   const inRangeSortedStores = useMemo(() => {

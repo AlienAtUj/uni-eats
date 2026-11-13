@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect } from 'react'
+import Image from 'next/image'
 import { useRouter } from 'next/navigation'
 import { StoreProvider, useStore } from './store'
 import { HomeScreen } from './home-screen'
@@ -13,29 +14,56 @@ import { ProfileScreen } from './profile-screen'
 import { BottomNav } from './bottom-nav'
 import { dashboardPathForRole } from '@/lib/firebase-auth'
 
-function MerchantRedirect() {
+function AuthSessionGate() {
   const router = useRouter()
-  const { userRole, isAuthLoading } = useStore()
+  const { user, userRole, isAuthLoading } = useStore()
 
   useEffect(() => {
-    if (!isAuthLoading && userRole === 'merchant') {
+    if (isAuthLoading) return
+
+    // 1. Mandatory Session Protection: Users cannot browse without an active authenticated session
+    if (!user) {
+      router.replace('/login')
+      return
+    }
+
+    // 2. Role-based isolation: Merchants are sent directly to their management console
+    if (userRole === 'merchant') {
       router.replace(dashboardPathForRole(userRole))
     }
-  }, [isAuthLoading, userRole, router])
+  }, [isAuthLoading, user, userRole, router])
 
   return null
 }
 
-function Screens() {
-  const { screen, userRole, isAuthLoading } = useStore()
-
-  if (isAuthLoading || userRole === 'merchant') {
-    return (
-      <div className="flex h-full items-center justify-center">
-        <div className="h-8 w-8 animate-spin rounded-full border-4 border-primary border-t-transparent" />
+function BrandedAuthSplash() {
+  return (
+    <div className="flex h-full min-h-[70vh] flex-col items-center justify-center gap-4 bg-background px-6 text-center">
+      <div className="flex h-16 w-16 items-center justify-center overflow-hidden rounded-2xl bg-[oklch(0.22_0.04_150)] shadow-md ring-1 ring-border/50">
+        <Image
+          src="/dash-logo.jpg"
+          alt="Dash"
+          width={64}
+          height={64}
+          className="h-full w-full object-cover"
+          priority
+        />
       </div>
-    )
+      <div className="flex items-center gap-2 text-sm font-semibold text-muted-foreground">
+        <span className="inline-block h-4 w-4 animate-spin rounded-full border-2 border-[#287d46] border-t-transparent" />
+        <span>Securing your session...</span>
+      </div>
+    </div>
+  )
+}
+
+function Screens() {
+  const { screen, user, userRole, isAuthLoading } = useStore()
+
+  if (isAuthLoading || !user || userRole === 'merchant') {
+    return <BrandedAuthSplash />
   }
+
   switch (screen) {
     case 'restaurant':
       return <RestaurantScreen />
@@ -57,15 +85,15 @@ function Screens() {
 export function UniEatsApp() {
   return (
     <StoreProvider>
-      <MerchantRedirect />
-      <StudentShell />
+      <AuthSessionGate />
+      <CustomerShell />
     </StoreProvider>
   )
 }
 
-function StudentShell() {
-  const { userRole, isAuthLoading } = useStore()
-  const hideNav = isAuthLoading || userRole === 'merchant'
+function CustomerShell() {
+  const { user, userRole, isAuthLoading } = useStore()
+  const hideNav = isAuthLoading || !user || userRole === 'merchant'
 
   return (
     <div className="flex h-dvh justify-center bg-[oklch(0.16_0.03_150)] md:h-auto md:min-h-dvh md:py-8">

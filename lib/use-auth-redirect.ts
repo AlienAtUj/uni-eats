@@ -6,7 +6,7 @@ import { onAuthStateChanged } from 'firebase/auth'
 import { auth } from '@/lib/firebase'
 import { dashboardPathForRole, fetchUserRole } from '@/lib/firebase-auth'
 
-/** If a store owner is already signed in, send them to the owner dashboard. */
+/** If a user is already signed in, send them to their role-specific dashboard so they don't see login again. */
 export function useRedirectLoggedInOwner() {
   const router = useRouter()
 
@@ -16,6 +16,8 @@ export function useRedirectLoggedInOwner() {
       const role = await fetchUserRole(user.uid)
       if (role === 'merchant') {
         router.replace(dashboardPathForRole(role))
+      } else {
+        router.replace('/')
       }
     })
     return unsubscribe

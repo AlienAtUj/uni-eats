@@ -1,18 +1,17 @@
 import { doc, getDoc, setDoc } from 'firebase/firestore'
 import { db } from './firebase'
 
-export type UserRole = 'student' | 'merchant'
+export type UserRole = 'customer' | 'merchant' | 'student'
 
-const ROLE_STORAGE_PREFIX = 'unieats-role:'
+const ROLE_STORAGE_PREFIX = 'dash-role:'
 
 function roleStorageKey(uid: string) {
   return `${ROLE_STORAGE_PREFIX}${uid}`
 }
 
 export function normalizeUserRole(value: unknown): UserRole | null {
-  if (typeof value !== 'string') return null
+  if (typeof value !== 'string') return 'customer'
   const role = value.trim().toLowerCase()
-  if (role === 'student') return 'student'
   if (
     role === 'merchant' ||
     role === 'store-owner' ||
@@ -23,7 +22,7 @@ export function normalizeUserRole(value: unknown): UserRole | null {
   ) {
     return 'merchant'
   }
-  return null
+  return 'customer'
 }
 
 function cacheRole(uid: string, role: UserRole) {
@@ -68,26 +67,51 @@ export async function fetchUserRole(uid: string): Promise<UserRole | null> {
 export type UserProfileInput = {
   name: string
   email: string
-  role: UserRole
+  role?: UserRole
+  phone?: string
+  deliveryAddress?: string
+  unitOrComplex?: string
+  suburb?: string
+  city?: string
+  postalCode?: string
+  deliveryNotes?: string
+  firstName?: string
+  lastName?: string
   [key: string]: unknown
 }
 
 export async function saveUserProfile(uid: string, data: UserProfileInput) {
-  // 1. Normalize and validate role
-  const role = normalizeUserRole(data.role)
-  if (!role) {
-    throw new Error('Choose Student or Store Owner before creating your account.')
-  }
+  // 1. Normalize role (defaults to 'customer' for Dash users)
+  const role = normalizeUserRole(data.role || 'customer') || 'customer'
 
-  // 2. Build a clean payload – explicitly set role and validated profile fields
+  // 2. Build a clean payload – explicitly set role and all user profile fields
   const payload: Record<string, unknown> = {
     name: String(data.name || '').trim(),
     email: String(data.email || '').trim(),
     role: role,
+    updatedAt: Date.now(),
   }
 
   if (typeof data.phone === 'string' && data.phone.trim()) {
     payload.phone = data.phone.trim()
+  }
+  if (typeof data.deliveryAddress === 'string' && data.deliveryAddress.trim()) {
+    payload.deliveryAddress = data.deliveryAddress.trim()
+  }
+  if (typeof data.unitOrComplex === 'string' && data.unitOrComplex.trim()) {
+    payload.unitOrComplex = data.unitOrComplex.trim()
+  }
+  if (typeof data.suburb === 'string' && data.suburb.trim()) {
+    payload.suburb = data.suburb.trim()
+  }
+  if (typeof data.city === 'string' && data.city.trim()) {
+    payload.city = data.city.trim()
+  }
+  if (typeof data.postalCode === 'string' && data.postalCode.trim()) {
+    payload.postalCode = data.postalCode.trim()
+  }
+  if (typeof data.deliveryNotes === 'string' && data.deliveryNotes.trim()) {
+    payload.deliveryNotes = data.deliveryNotes.trim()
   }
   if (typeof data.campusId === 'string' && data.campusId.trim()) {
     payload.campusId = data.campusId.trim()

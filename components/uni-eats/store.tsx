@@ -8,10 +8,11 @@ import {
   useEffect,
   type ReactNode,
 } from 'react'
-import { campuses, restaurants, type Restaurant } from '@/lib/data'
+import { campuses, type Restaurant } from '@/lib/data'
 import {
   type DeliveryLocation,
   SERVICE_DELIVERY_RADIUS_KM,
+  detectAccurateUserLocation,
   reverseGeocodeCoords,
   calculateDistanceKm,
   resolveStoreCoords,
@@ -202,38 +203,31 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   }
 
   const detectUserLocation = async (): Promise<DeliveryLocation | null> => {
-    if (typeof window === 'undefined' || !('geolocation' in navigator)) {
-      setLocationError('Geolocation is not supported by your browser. Please search and select your delivery address.')
-      setIsLocatingGps(false)
+    if (typeof window === 'undefined') {
       return null
     }
     setIsLocatingGps(true)
     setLocationError(null)
-    return new Promise((resolve) => {
-      navigator.geolocation.getCurrentPosition(
-        async (pos) => {
-          try {
-            const { latitude, longitude } = pos.coords
-            const resolved = await reverseGeocodeCoords(latitude, longitude)
-            setUserLocation(resolved)
-            resolve(resolved)
-          } catch (err) {
-            console.warn('Geolocation reverse geocode failed:', err)
-            setLocationError('Could not resolve your street address. Please search and enter your address.')
-            resolve(null)
-          } finally {
-            setIsLocatingGps(false)
-          }
-        },
-        (err) => {
-          console.warn('Geolocation permission or lookup error:', err?.message || err)
-          setLocationError('Location access was denied or unavailable. Please enter your delivery address to see stores near you.')
-          setIsLocatingGps(false)
-          resolve(null)
-        },
-        { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 },
+    try {
+      const resolved = await detectAccurateUserLocation()
+      if (resolved) {
+        setUserLocation(resolved)
+        return resolved
+      } else {
+        setLocationError(
+          'Location access was denied or unavailable. Please enter your delivery address to see stores near you.'
+        )
+        return null
+      }
+    } catch (err) {
+      console.warn('Geolocation detection error:', err)
+      setLocationError(
+        'Could not detect your exact address automatically. Please search and select your delivery address.'
       )
-    })
+      return null
+    } finally {
+      setIsLocatingGps(false)
+    }
   }
 
   // Hydrate location, carts and active order from storage on mount
@@ -353,8 +347,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   }
 
   const { restaurants: liveRestaurants } = useFirebaseRestaurants()
-  const currentRestaurants: Restaurant[] =
-    liveRestaurants && liveRestaurants.length > 0 ? liveRestaurants : restaurants
+  const currentRestaurants: Restaurant[] = liveRestaurants || []
 
   // Auth state
   const [user, setUser] = useState<User | null>(null)
@@ -442,10 +435,6 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     () => cart.reduce((sum, l) => sum + (Number(l.unitPrice) || 0) * (Number(l.quantity) || 0), 0),
     [cart],
   )
-  const itemCount = useMemo(
-    () => cart.reduce((sum, l) => sum + (Number(l.quantity) || 0), 0),
-    [cart],
-  )
   const totalItemCount = useMemo(
     () =>
       Object.values(carts)
@@ -453,6 +442,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         .reduce((sum, l) => sum + (Number(l.quantity) || 0), 0),
     [carts],
   )
+  const itemCount = totalItemCount
 
   // Geocode stores that have an address but no coordinates
   const [, setGeoTick] = useState(0)
@@ -592,10 +582,16 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       setSelectedCartId(rid)
     },
     updateQty: (lineId, delta) => {
-      if (!activeCartId) return
-      const rid = activeCartId
       setCarts((prev) => {
-        const lines = (prev[rid] ?? [])
+        let targetRid: string | null = null
+        for (const [rid, lines] of Object.entries(prev)) {
+          if (lines.some((l) => l.lineId === lineId)) {
+            targetRid = rid
+            break
+          }
+        }
+        if (!targetRid) return prev
+        const lines = (prev[targetRid] ?? [])
           .map((l) =>
             l.lineId === lineId
               ? { ...l, quantity: Math.min(99, Math.max(0, l.quantity + delta)) }
@@ -603,8 +599,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           )
           .filter((l) => l.quantity > 0)
         const next = { ...prev }
-        if (lines.length) next[rid] = lines
-        else delete next[rid]
+        if (lines.length) next[targetRid] = lines
+        else delete next[targetRid]
         return next
       })
     },
@@ -658,7 +654,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         firestoreDocId = await createOrder({
           orderId: orderDisplayId,
           customerId: user.uid,
-          customerName: user.displayName || user.email?.split('@')[0] || 'Campus Student',
+          customerName: user.displayName || user.email?.split('@')[0] || 'Dash Customer',
           merchantId,
           merchantName,
           items: orderLines.map((line) => ({

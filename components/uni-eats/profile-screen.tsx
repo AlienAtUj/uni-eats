@@ -489,7 +489,7 @@ export function UserProfileView({ user, userRole, onSignOut, onGoHome, onOrders 
         <p className="text-sm text-muted-foreground">{user.email}</p>
         <div className="mt-3 inline-flex items-center gap-1.5 rounded-full bg-accent/10 px-3 py-1 text-xs font-bold text-accent">
           {isMerchant ? <StoreIcon className="h-3.5 w-3.5" /> : <UserIcon className="h-3.5 w-3.5" />}
-          {isMerchant ? 'Store Owner' : 'Student'}
+          {isMerchant ? 'Store Owner' : 'Customer'}
         </div>
       </div>
 

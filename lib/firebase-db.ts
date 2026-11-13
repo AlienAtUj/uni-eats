@@ -21,9 +21,6 @@ import useSWR from 'swr'
 import { seedInitialDataIfNeeded } from './seed-data'
 import {
   Restaurant,
-  restaurants as fallbackRestaurants,
-  defaultGroceryStores,
-  defaultRestaurants,
   isGroceryCategory,
   campuses,
 } from './data'
@@ -108,7 +105,7 @@ const fetcher = async (path: string): Promise<ProductDoc[]> => {
 export function useFirebaseProducts() {
   const { data, error, mutate } = useSWR<ProductDoc[]>('products', fetcher, {
     revalidateOnFocus: false,
-    dedupingInterval: 60000,
+    dedupingInterval: 300000,
     shouldRetryOnError: false,
   })
 
@@ -312,31 +309,13 @@ const restaurantsFetcher = async (): Promise<Restaurant[]> => {
     }
   }
 
-  // Only fall back to defaultRestaurants if the database has no meal restaurants
-  const hasMealRestaurant = existingRestaurants.some((r) => r.storeType !== 'grocery')
-  const existingNames = new Set(existingRestaurants.map((r) => r.name.toLowerCase().trim()))
-  if (!hasMealRestaurant) {
-    for (const defRest of defaultRestaurants) {
-      if (!restaurantIds.has(defRest.id) && !existingNames.has(defRest.name.toLowerCase().trim())) {
-        existingRestaurants.push(defRest)
-        restaurantIds.add(defRest.id)
-      }
-    }
-  }
-  for (const defStore of defaultGroceryStores) {
-    if (!restaurantIds.has(defStore.id) && !existingNames.has(defStore.name.toLowerCase().trim())) {
-      existingRestaurants.push(defStore)
-      restaurantIds.add(defStore.id)
-    }
-  }
-
   return existingRestaurants
 }
 
 export function useFirebaseRestaurants() {
   const { data, error, mutate } = useSWR<Restaurant[]>('restaurants', restaurantsFetcher, {
-    revalidateOnFocus: true,
-    dedupingInterval: 10000,
+    revalidateOnFocus: false,
+    dedupingInterval: 300000,
     shouldRetryOnError: false,
   })
 

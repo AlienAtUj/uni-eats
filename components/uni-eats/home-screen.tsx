@@ -3,7 +3,7 @@
 import Image from 'next/image'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import {
-  restaurants,
+  formatPrice,
   type MenuItem,
   type Restaurant,
 } from '@/lib/data'
@@ -94,7 +94,7 @@ export function HomeScreen() {
       return
     }
 
-    // 2. Fast 120ms live API lookup across all South African streets, complexes & suburbs
+    // 2. Debounced live API lookup across all South African streets, complexes & suburbs
     const controller = new AbortController()
     setIsSearchingAddress(true)
     const timer = setTimeout(async () => {
@@ -112,7 +112,7 @@ export function HomeScreen() {
           setIsSearchingAddress(false)
         }
       }
-    }, 120)
+    }, 260)
 
     return () => {
       clearTimeout(timer)
@@ -216,10 +216,7 @@ export function HomeScreen() {
     return 'AK'
   }, [user])
 
-  const allEntries =
-    liveRestaurants && liveRestaurants.length > 0
-      ? liveRestaurants
-      : restaurants
+  const allEntries = liveRestaurants || []
 
   // Recomputes exact real-time distance in km, delivery fee, and time for every store
   const storesWithDistance = useMemo(() => {
@@ -348,7 +345,7 @@ export function HomeScreen() {
             </span>
             <div>
               <p className="text-[12px] font-medium leading-tight text-[oklch(0.97_0.02_120)]/75">
-                Good food. Great times.
+                Stores and Eats ASAP
               </p>
               <p className="text-[20px] font-extrabold leading-tight tracking-tight text-white">
                 Dash
@@ -380,20 +377,27 @@ export function HomeScreen() {
                 <PinIcon className="h-4 w-4" />
               )}
             </span>
-            <div className="flex min-w-0 flex-col">
-              <span className="truncate text-[14px] font-bold text-white">
-                {isLocatingGps && !userLocation
-                  ? 'Detecting your location...'
-                  : userLocation
-                    ? userLocation.label
-                    : 'Set your delivery address'}
-              </span>
-              <span className="truncate text-[11px] font-medium text-white/75">
-                {userLocation
-                  ? userLocation.address || 'Delivering to your location'
-                  : 'Required to see stores & products near you'}
-              </span>
-            </div>
+              <div className="flex min-w-0 flex-col">
+                <span className="flex items-center gap-1.5 truncate text-[14px] font-bold text-white">
+                  <span>
+                    {isLocatingGps && !userLocation
+                      ? 'Detecting your location...'
+                      : userLocation
+                        ? userLocation.label
+                        : 'Set your delivery address'}
+                  </span>
+                  {userLocation?.isApproximate && (
+                    <span className="rounded-full bg-amber-400/20 px-1.5 py-0.5 text-[10px] font-semibold text-amber-200">
+                      Approximate
+                    </span>
+                  )}
+                </span>
+                <span className="truncate text-[11px] font-medium text-white/75">
+                  {userLocation
+                    ? userLocation.address || 'Delivering to your location'
+                    : 'Required to see stores & products near you'}
+                </span>
+              </div>
           </span>
           <ChevronDownIcon className="ml-2 h-4 w-4 shrink-0 text-white/80" />
         </button>
@@ -547,16 +551,16 @@ export function HomeScreen() {
               </span>
             </button>
 
-            {/* User's Recent Saved Addresses (only if they searched previously) */}
+            {/* User's Real Recent Delivery Addresses */}
             {recentLocations.length > 0 && (
               <div className="mt-5 border-t border-border/70 pt-4">
                 <p className="mb-2 text-[11px] font-bold uppercase tracking-wider text-muted-foreground">
-                  Recent delivery addresses
+                  Recent addresses
                 </p>
                 <div className="flex flex-col gap-1.5">
                   {recentLocations.map((loc, idx) => (
                     <button
-                      key={`${loc.label}-${idx}`}
+                      key={`gate-recent-${idx}`}
                       type="button"
                       onClick={() => handleSelectLocation(loc)}
                       className="flex w-full items-center gap-2.5 rounded-xl border border-border/70 bg-[#f8f9f7] p-2.5 text-left transition-colors hover:bg-muted"
@@ -912,8 +916,13 @@ export function HomeScreen() {
                   </section>
                 ) : (
                   <>
-                    {/* Promo banners */}
-                    <ShopPromoCarousel onOpenDepartment={openDepartment} />
+                    {/* Dynamic Promo banners from live in-range specials & stores */}
+                    <ShopPromoCarousel
+                      specials={marketSpecials}
+                      stores={groceryStores}
+                      onOpenItem={(it, st) => setSelectedEntry({ item: it, store: st })}
+                      onOpenStore={openRestaurant}
+                    />
 
                     {/* Quick quick categories */}
                     <section className="mt-5">
@@ -1406,57 +1415,98 @@ function MealRail({
   )
 }
 
-const PROMOS = [
-  {
-    id: 'braai',
-    eyebrow: 'Braai weekend',
-    title: 'Boerewors now R69.95',
-    cta: 'Shop Butcher',
-    dept: 'butcher',
-    from: '#7a1f1a',
-    to: '#d2452f',
-    art: '/categories/butcher.svg',
-  },
-  {
-    id: 'fresh',
-    eyebrow: 'Fresh deals',
-    title: 'Farm-fresh fruit & veg',
-    cta: 'Shop Produce',
-    dept: 'fresh-produce',
-    from: '#1f5a2e',
-    to: '#3f9a4a',
-    art: '/categories/fresh-produce.svg',
-  },
-  {
-    id: 'breakfast',
-    eyebrow: 'Delivered in 60 min',
-    title: 'Bread, milk & eggs',
-    cta: 'Shop Essentials',
-    dept: 'bread-milk',
-    from: '#8a4b12',
-    to: '#e59838',
-    art: '/categories/bread-milk.svg',
-  },
-] as const
+const PROMO_PALETTES = [
+  { from: '#7a1f1a', to: '#d2452f' },
+  { from: '#1f5a2e', to: '#3f9a4a' },
+  { from: '#8a4b12', to: '#e59838' },
+  { from: '#1a4365', to: '#2b6cb0' },
+]
+
+interface DynamicPromoSlide {
+  id: string
+  eyebrow: string
+  title: string
+  cta: string
+  from: string
+  to: string
+  art?: string
+  onClick: () => void
+}
 
 function ShopPromoCarousel({
-  onOpenDepartment,
+  specials,
+  stores,
+  onOpenItem,
+  onOpenStore,
 }: {
-  onOpenDepartment: (id: string) => void
+  specials: Array<{ item: MenuItem; store: Restaurant }>
+  stores: Restaurant[]
+  onOpenItem: (item: MenuItem, store: Restaurant) => void
+  onOpenStore: (storeId: string) => void
 }) {
   const ref = useRef<HTMLDivElement>(null)
   const [index, setIndex] = useState(0)
 
+  // 1. Build slides exclusively from real products on special in live in-range stores
+  const slides = useMemo<DynamicPromoSlide[]>(() => {
+    if (specials.length > 0) {
+      return specials.slice(0, 4).map(({ item, store }, i) => {
+        const palette = PROMO_PALETTES[i % PROMO_PALETTES.length]
+        const savings =
+          typeof item.oldPrice === 'number' && item.oldPrice > item.price
+            ? item.oldPrice - item.price
+            : 0
+        return {
+          id: `special-${item.id}-${i}`,
+          eyebrow:
+            savings > 0
+              ? `Save ${formatPrice(savings)} • ${store.name}`
+              : `Special at ${store.name}`,
+          title: `${item.name} now ${formatPrice(item.price)}`,
+          cta: 'Shop Deal',
+          art: item.image,
+          from: palette.from,
+          to: palette.to,
+          onClick: () => onOpenItem(item, store),
+        }
+      })
+    }
+
+    // 2. If no products currently have marked-down oldPrice, feature real in-range stores (no fake prices)
+    if (stores.length > 0) {
+      return stores.slice(0, 3).map((st, i) => {
+        const palette = PROMO_PALETTES[i % PROMO_PALETTES.length]
+        return {
+          id: `store-${st.id}`,
+          eyebrow: st.distance
+            ? `${st.distance} away • Real-time Delivery`
+            : 'Open Now for Delivery',
+          title: st.name,
+          cta: 'View Store',
+          art: st.image,
+          from: palette.from,
+          to: palette.to,
+          onClick: () => onOpenStore(st.id),
+        }
+      })
+    }
+
+    return []
+  }, [specials, stores, onOpenItem, onOpenStore])
+
   useEffect(() => {
     const el = ref.current
-    if (!el) return
+    if (!el || slides.length <= 1) return
     const timer = setInterval(() => {
       const next =
-        (Math.round(el.scrollLeft / el.clientWidth) + 1) % PROMOS.length
+        (Math.round(el.scrollLeft / el.clientWidth) + 1) % slides.length
       el.scrollTo({ left: next * el.clientWidth, behavior: 'smooth' })
     }, 5000)
     return () => clearInterval(timer)
-  }, [])
+  }, [slides.length])
+
+  // Don't render empty carousel if no in-range stores or deals
+  if (slides.length === 0) return null
 
   return (
     <section className="mt-4">
@@ -1468,54 +1518,58 @@ function ShopPromoCarousel({
         }}
         className="no-scrollbar flex snap-x snap-mandatory overflow-x-auto"
       >
-        {PROMOS.map((p) => (
+        {slides.map((p) => (
           <div key={p.id} className="w-full shrink-0 snap-center px-5">
             <button
               type="button"
-              onClick={() => onOpenDepartment(p.dept)}
-              className="relative flex h-36 w-full items-center overflow-hidden rounded-3xl p-5 text-left text-white shadow-md"
+              onClick={p.onClick}
+              className="relative flex h-36 w-full items-center overflow-hidden rounded-3xl p-5 text-left text-white shadow-md transition-transform active:scale-[0.99]"
               style={{
                 background: `linear-gradient(120deg, ${p.from} 0%, ${p.to} 100%)`,
               }}
             >
               <span className="absolute -right-10 -top-10 h-40 w-40 rounded-full bg-white/10" />
               <span className="absolute -bottom-12 right-16 h-28 w-28 rounded-full bg-white/10" />
-              <span className="relative z-10 max-w-[60%]">
-                <span className="text-[11px] font-bold uppercase tracking-wider text-white/80">
+              <span className="relative z-10 max-w-[62%]">
+                <span className="block truncate text-[11px] font-bold uppercase tracking-wider text-white/80">
                   {p.eyebrow}
                 </span>
-                <span className="mt-1 block text-xl font-extrabold leading-tight">
+                <span className="mt-1 line-clamp-2 text-lg font-extrabold leading-tight">
                   {p.title}
                 </span>
-                <span className="mt-3 inline-flex items-center gap-1 rounded-full bg-white px-3 py-1.5 text-xs font-extrabold text-[oklch(0.22_0.04_150)]">
+                <span className="mt-2.5 inline-flex items-center gap-1 rounded-full bg-white px-3 py-1.5 text-xs font-extrabold text-[oklch(0.22_0.04_150)]">
                   {p.cta}
                   <ChevronRightIcon className="h-3.5 w-3.5" />
                 </span>
               </span>
-              <span className="absolute bottom-3 right-4 h-24 w-24 rotate-6 overflow-hidden rounded-2xl shadow-lg ring-4 ring-white/30">
-                <Image
-                  src={p.art}
-                  alt=""
-                  fill
-                  sizes="96px"
-                  className="object-cover"
-                />
-              </span>
+              {p.art && (
+                <span className="absolute bottom-3 right-4 h-24 w-24 rotate-6 overflow-hidden rounded-2xl shadow-lg ring-4 ring-white/30">
+                  <Image
+                    src={p.art}
+                    alt=""
+                    fill
+                    sizes="96px"
+                    className="object-cover"
+                  />
+                </span>
+              )}
             </button>
           </div>
         ))}
       </div>
-      <div className="mt-2.5 flex justify-center gap-1.5">
-        {PROMOS.map((p, i) => (
-          <span
-            key={p.id}
-            className={cn(
-              'h-1.5 rounded-full transition-all',
-              i === index ? 'w-5 bg-[#287d46]' : 'w-1.5 bg-[#287d46]/25'
-            )}
-          />
-        ))}
-      </div>
+      {slides.length > 1 && (
+        <div className="mt-2.5 flex justify-center gap-1.5">
+          {slides.map((p, i) => (
+            <span
+              key={p.id}
+              className={cn(
+                'h-1.5 rounded-full transition-all',
+                i === index ? 'w-5 bg-[#287d46]' : 'w-1.5 bg-[#287d46]/25'
+              )}
+            />
+          ))}
+        </div>
+      )}
     </section>
   )
 }
