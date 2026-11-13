@@ -831,11 +831,23 @@ export async function detectAccurateUserLocation(): Promise<DeliveryLocation | n
 
   return new Promise((resolve) => {
     let resolved = false
+    let watchId: number | null = null
     let bestFix: { lat: number; lng: number; accuracy: number } | null = null
+
+    const cleanupWatch = () => {
+      if (watchId !== null) {
+        try {
+          navigator.geolocation.clearWatch(watchId)
+        } catch {}
+        watchId = null
+      }
+    }
 
     const finish = async (fix: { lat: number; lng: number; accuracy: number } | null) => {
       if (resolved) return
       resolved = true
+      cleanupWatch()
+
       if (!fix) {
         resolve(null)
         return
@@ -858,35 +870,14 @@ export async function detectAccurateUserLocation(): Promise<DeliveryLocation | n
       }
     }
 
-    // Safety timeout: 4.5 seconds maximum so the app never freezes
+    // Allow up to 7 seconds for a true hardware GPS satellite lock on mobile
     const timeoutTimer = setTimeout(() => {
       finish(bestFix)
-    }, 4500)
+    }, 7000)
 
     try {
-      // 1. Initial quick high-accuracy fix
+      // 1. Initial high-accuracy fix
       navigator.geolocation.getCurrentPosition(
-        (pos) => {
-          const acc = pos.coords.accuracy || 100
-          bestFix = {
-            lat: pos.coords.latitude,
-            lng: pos.coords.longitude,
-            accuracy: acc,
-          }
-          // If true hardware GPS accuracy (<= 50 meters), finish immediately!
-          if (acc <= 50) {
-            clearTimeout(timeoutTimer)
-            finish(bestFix)
-          }
-        },
-        () => {
-          // If immediate fix errored, wait for watch or timeout
-        },
-        { enableHighAccuracy: true, timeout: 3500, maximumAge: 0 }
-      )
-
-      // 2. Watch position for refined GPS lock
-      const watchId = navigator.geolocation.watchPosition(
         (pos) => {
           const acc = pos.coords.accuracy || 100
           if (!bestFix || acc < bestFix.accuracy) {
@@ -896,18 +887,38 @@ export async function detectAccurateUserLocation(): Promise<DeliveryLocation | n
               accuracy: acc,
             }
           }
-          if (acc <= 50) {
+          // If true hardware GPS accuracy (<= 65 meters), finish immediately!
+          if (acc <= 65) {
             clearTimeout(timeoutTimer)
-            try {
-              navigator.geolocation.clearWatch(watchId)
-            } catch {}
+            finish(bestFix)
+          }
+        },
+        () => {
+          // If immediate fix errored, wait for watch or timeout
+        },
+        { enableHighAccuracy: true, timeout: 5500, maximumAge: 0 }
+      )
+
+      // 2. Watch position for refined GPS satellite lock
+      watchId = navigator.geolocation.watchPosition(
+        (pos) => {
+          const acc = pos.coords.accuracy || 100
+          if (!bestFix || acc < bestFix.accuracy) {
+            bestFix = {
+              lat: pos.coords.latitude,
+              lng: pos.coords.longitude,
+              accuracy: acc,
+            }
+          }
+          if (acc <= 65) {
+            clearTimeout(timeoutTimer)
             finish(bestFix)
           }
         },
         () => {
           // Ignore watch error; fallback to bestFix on timeout
         },
-        { enableHighAccuracy: true, timeout: 4000, maximumAge: 0 }
+        { enableHighAccuracy: true, timeout: 6500, maximumAge: 0 }
       )
     } catch {
       clearTimeout(timeoutTimer)

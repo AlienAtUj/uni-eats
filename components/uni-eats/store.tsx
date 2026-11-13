@@ -262,6 +262,21 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           setUserLocationState(parsed)
           setCustomLocationLabel(parsed.label)
           setIsLocatingGps(false)
+
+          // Auto-heal if previous session saved raw coordinates instead of a street/suburb name
+          if (typeof parsed.label === 'string' && /^-?\d+\.\d+,\s*-?\d+\.\d+$/.test(parsed.label.trim())) {
+            reverseGeocodeCoords(parsed.coords.lat, parsed.coords.lng)
+              .then((resolved) => {
+                if (resolved && resolved.label && !/^-?\d+\.\d+,\s*-?\d+\.\d+$/.test(resolved.label.trim())) {
+                  setUserLocation({
+                    ...resolved,
+                    isApproximate: parsed.isApproximate,
+                    accuracy: parsed.accuracy,
+                  })
+                }
+              })
+              .catch(() => {})
+          }
         } else {
           detectUserLocation()
         }
