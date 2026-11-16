@@ -34,13 +34,11 @@ const pickupTimes = [
 ]
 
 const dashPaymentOptions: Array<{
-  id: DashPaymentMethod
+  id: 'paystack' | 'cash_on_pickup'
   label: string
   tag: string
 }> = [
-  { id: 'ozow', label: 'Ozow Instant EFT', tag: 'Instant EFT - Lowest fees' },
-  { id: 'capitec_pay', label: 'Capitec Pay', tag: 'Instant EFT - Lowest fees' },
-  { id: 'card', label: 'Debit / Credit Card', tag: 'Secondary' },
+  { id: 'paystack', label: 'Paystack (Card / EFT / SnapScan)', tag: 'Instant EFT, Card & SnapScan' },
 ]
 
 declare global {
@@ -83,7 +81,7 @@ export function CheckoutScreen() {
   const [paymentError, setPaymentError] = useState<string | null>(null)
   const [hasDashPlus, setHasDashPlus] = useState(false)
   const [fulfillmentMode, setFulfillmentMode] = useState<'delivery' | 'pickup'>('delivery')
-  const [dashPayment, setDashPayment] = useState<DashPaymentMethod | 'cash_on_pickup'>('ozow')
+  const [dashPayment, setDashPayment] = useState<'paystack' | 'cash_on_pickup'>('paystack')
   const [roadDistanceKm, setRoadDistanceKm] = useState<number | null>(null)
   const [roadDistanceError, setRoadDistanceError] = useState<string | null>(null)
 
@@ -138,14 +136,13 @@ export function CheckoutScreen() {
   // Ensure Cash on Pickup is only selectable in Self-Pickup mode
   useEffect(() => {
     if (fulfillmentMode === 'delivery' && dashPayment === 'cash_on_pickup') {
-      setDashPayment('ozow')
-      setPaymentMethod('Ozow Instant EFT')
+      setDashPayment('paystack')
+      setPaymentMethod('Paystack (Card / EFT / SnapScan)')
     }
   }, [fulfillmentMode, dashPayment, setPaymentMethod])
 
   const { checkoutSummary, zoneError } = useMemo(() => {
-    const activePayMethod: DashPaymentMethod =
-      dashPayment === 'cash_on_pickup' ? 'ozow' : dashPayment
+    const activePayMethod: DashPaymentMethod = 'ozow'
     if (fulfillmentMode === 'pickup') {
       const smallOrderInfo = getSmallOrderFeeInfo(subtotal, dashStoreType)
       const pickupTotal = Number(
@@ -249,23 +246,12 @@ export function CheckoutScreen() {
       return
     }
 
-    // If Paystack public key is not configured, place order with selected Dash payment channel
+    // Paystack Online Payment Flow
     const publicKey = process.env.NEXT_PUBLIC_PAYSTACK_PUBLIC_KEY
     if (!publicKey) {
-      setIsProcessingPayment(true)
-      try {
-        await placeOrder({
-          paymentStatus: 'paid',
-          paymentChannel: dashPayment,
-          verifiedTotalZar: total,
-          deliveryFeeZar: deliveryFee,
-          roadDistanceKm: fulfillmentMode === 'pickup' ? 0 : (roadDistanceKm ?? undefined),
-          smallOrderFeeZar: smallOrderFee,
-          dashPlusApplied: checkoutSummary?.dashPlusApplied ?? false,
-        })
-      } finally {
-        setIsProcessingPayment(false)
-      }
+      setPaymentError(
+        'Paystack Public Key (NEXT_PUBLIC_PAYSTACK_PUBLIC_KEY) is missing in .env.local.'
+      )
       return
     }
 
@@ -514,7 +500,7 @@ export function CheckoutScreen() {
           </button>
         </div>
 
-        {/* Payment Priority: Ozow / Capitec Pay Default ("Instant EFT - Lowest fees"), Card Secondary */}
+        {/* Payment Method: Paystack Only (plus Cash on Pickup when Self-Pickup is selected) */}
         <div className="rounded-2xl bg-card p-4 shadow-sm ring-1 ring-border">
           <p className="mb-2.5 text-xs font-bold uppercase tracking-wider text-muted-foreground">
             Payment Method
@@ -548,7 +534,7 @@ export function CheckoutScreen() {
                     <span
                       className={cn(
                         'mt-0.5 block text-[11px] font-semibold',
-                        opt.id === 'card' || opt.id === 'cash_on_pickup'
+                        opt.id === 'cash_on_pickup'
                           ? 'text-[#545454]'
                           : 'text-[#287d46]'
                       )}
@@ -650,7 +636,7 @@ export function CheckoutScreen() {
               ? 'Processing secure payment...'
               : dashPayment === 'cash_on_pickup'
                 ? 'Place Self-Pickup Order (Cash)'
-                : `Pay with ${dashPayment === 'ozow' ? 'Ozow' : dashPayment === 'capitec_pay' ? 'Capitec Pay' : 'Card'}`}
+                : 'Pay with Paystack'}
           </span>
           <span>{formatZar(total)}</span>
         </button>
@@ -679,11 +665,14 @@ export function CheckoutScreen() {
         title="Payment method"
       >
         <OptionList
-          options={dashPaymentOptions.map((o) => o.label)}
-          selected={dashPaymentOptions.find((o) => o.id === dashPayment)?.label || 'Ozow Instant EFT'}
+          options={
+            fulfillmentMode === 'pickup'
+              ? ['Paystack (Card / EFT / SnapScan)', 'Cash on Pickup']
+              : ['Paystack (Card / EFT / SnapScan)']
+          }
+          selected={dashPayment === 'cash_on_pickup' ? 'Cash on Pickup' : 'Paystack (Card / EFT / SnapScan)'}
           onSelect={(v) => {
-            const match = dashPaymentOptions.find((o) => o.label === v)
-            if (match) setDashPayment(match.id)
+            setDashPayment(v === 'Cash on Pickup' ? 'cash_on_pickup' : 'paystack')
             setPaymentMethod(v)
             setPaymentError(null)
             setSheet(null)

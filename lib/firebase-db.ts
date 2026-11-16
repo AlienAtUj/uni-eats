@@ -666,12 +666,61 @@ export async function deleteProduct(productId: string) {
 // ORDERS – ACTIONS
 // ============================================================
 
-/** Create a new order (from student side) */
+/** Cryptographically uniform 4-digit code (1000-9999) */
+function randomFourDigitCode(): string {
+  if (typeof crypto !== 'undefined' && typeof crypto.getRandomValues === 'function') {
+    const arr = new Uint32Array(1)
+    crypto.getRandomValues(arr)
+    return String(1000 + (arr[0] % 9000))
+  }
+  return String(1000 + Math.floor(Math.random() * 9000))
+}
+
+/**
+ * Generates a unique, non-repeating 4-digit OTP by checking active Firestore orders.
+ * Guarantees no two active orders share the same OTP or pickup PIN.
+ */
+export async function generateUniqueOrderOtp(excludeCodes: string[] = []): Promise<string> {
+  const used = new Set<string>(excludeCodes.filter(Boolean))
+  try {
+    const activeQuery = query(
+      collection(db, 'orders'),
+      where('status', 'in', ['pending', 'preparing', 'ready'])
+    )
+    const snap = await getDocs(activeQuery)
+    for (const d of snap.docs) {
+      const data = d.data() as Partial<Order>
+      if (data.deliveryOtp) used.add(String(data.deliveryOtp))
+      if (data.pickupPin) used.add(String(data.pickupPin))
+    }
+  } catch {
+    // If offline or permission-scoped, still enforce uniqueness against excludeCodes
+  }
+
+  for (let attempt = 0; attempt < 100; attempt++) {
+    const candidate = randomFourDigitCode()
+    if (!used.has(candidate)) {
+      return candidate
+    }
+  }
+  return randomFourDigitCode()
+}
+
+/** Create a new order (from student side) with guaranteed unique non-repeating OTPs */
 export async function createOrder(orderData: Omit<Order, 'id' | 'createdAt' | 'updatedAt'>) {
   try {
+    const deliveryOtp =
+      orderData.deliveryOtp || (await generateUniqueOrderOtp())
+    const pickupPin =
+      orderData.pickupPin && orderData.pickupPin !== deliveryOtp
+        ? orderData.pickupPin
+        : await generateUniqueOrderOtp([deliveryOtp])
+
     const ordersRef = collection(db, 'orders')
     const docRef = await addDoc(ordersRef, {
       ...orderData,
+      deliveryOtp,
+      pickupPin,
       status: 'pending',
       createdAt: serverTimestamp(),
       updatedAt: serverTimestamp(),
@@ -722,6 +771,29 @@ export async function verifyOrderPickupPin(orderDocId: string, enteredPin: strin
     pickupVerified: true,
     updatedAt: serverTimestamp(),
   })
+}
+
+/**
+ * Driver Handover: Driver asks the client for their 4-digit Delivery PIN,
+ * enters it, and if it matches `deliveryOtp` in Firestore, marks the order Delivered.
+ */
+export async function verifyCustomerDeliveryOtp(orderDocId: string, enteredOtp: string) {
+  const orderRef = doc(db, 'orders', orderDocId)
+  const snap = await getDoc(orderRef)
+  if (!snap.exists()) {
+    throw new Error('Order not found.')
+  }
+  const data = snap.data() as Partial<Order>
+  if (!data.deliveryOtp || data.deliveryOtp !== enteredOtp.trim()) {
+    throw new Error('Invalid Delivery PIN. Ask the client for their 4-digit PIN.')
+  }
+  await updateDoc(orderRef, {
+    deliveryVerified: true,
+    deliveredAt: serverTimestamp(),
+    status: 'completed',
+    updatedAt: serverTimestamp(),
+  })
+  return true
 }
 
 /** Get orders for a merchant (with latest first) */

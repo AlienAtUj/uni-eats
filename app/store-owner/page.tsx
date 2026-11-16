@@ -906,15 +906,27 @@ export default function StoreOwnerDashboard() {
                               ))}
                             </div>
 
-                            {/* Total + Action Row */}
+                            {/* Total + Handover Codes + Action Row */}
                             <div className="flex items-center justify-between gap-3 pt-0.5">
-                              <div>
-                                <span className="block text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
-                                  Total
-                                </span>
-                                <span className="text-base font-extrabold text-foreground">
-                                  {formatPrice(order.total)}
-                                </span>
+                              <div className="flex items-center gap-3">
+                                <div>
+                                  <span className="block text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+                                    Total
+                                  </span>
+                                  <span className="text-base font-extrabold text-foreground">
+                                    {formatPrice(order.total)}
+                                  </span>
+                                </div>
+                                {(order.pickupPin || order.deliveryOtp) && (
+                                  <div className="rounded-lg bg-[#287d46]/10 px-2.5 py-1">
+                                    <span className="block text-[9px] font-bold uppercase tracking-wider text-[#287d46]">
+                                      PIN / OTP
+                                    </span>
+                                    <span className="font-mono text-xs font-black text-[#111111]">
+                                      {order.pickupPin || '----'} / {order.deliveryOtp || '----'}
+                                    </span>
+                                  </div>
+                                )}
                               </div>
 
                               {order.status === 'pending' && (

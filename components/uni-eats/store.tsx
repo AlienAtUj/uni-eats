@@ -28,6 +28,7 @@ import { fetchUserRole, type UserRole } from '@/lib/firebase-auth'
 import {
   useFirebaseRestaurants,
   createOrder,
+  generateUniqueOrderOtp,
   getCustomerOrders,
   type Order,
 } from '@/lib/firebase-db'
@@ -680,8 +681,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       const merchantName = orderLines[0].restaurantName
 
       let firestoreDocId: string | undefined = undefined
-      const deliveryOtp = generateDeliveryOtp()
-      const pickupPin = generateDeliveryOtp()
+      const deliveryOtp = await generateUniqueOrderOtp()
+      const pickupPin = await generateUniqueOrderOtp([deliveryOtp])
 
       try {
         firestoreDocId = await createOrder({
