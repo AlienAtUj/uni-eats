@@ -31,7 +31,7 @@ export const metadata: Metadata = {
 
 export const viewport: Viewport = {
   colorScheme: 'light',
-  themeColor: '#12351f',
+  themeColor: '#287d46',
   width: 'device-width',
   initialScale: 1,
   maximumScale: 1,
@@ -45,6 +45,12 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en" className={`${jakarta.variable} bg-background`}>
+      <head>
+        <link
+          rel="stylesheet"
+          href="https://api.fontshare.com/v2/css?f[]=satoshi@400,500,700,900&display=swap"
+        />
+      </head>
       <body className="font-sans antialiased">
         <PwaRegister />
         {children}

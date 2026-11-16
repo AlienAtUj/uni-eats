@@ -18,10 +18,21 @@ service firebase.storage {
       allow write: if request.auth != null && request.auth.uid == userId && request.resource.size < 5 * 1024 * 1024;
     }
 
+    // Driver verification documents — scoped strictly to the owning driver
+    match /driver-documents/{driverId}/{allPaths=**} {
+      allow read: if request.auth != null && request.auth.uid == driverId;
+      allow write: if request.auth != null && request.auth.uid == driverId && request.resource.size < 5 * 1024 * 1024;
+    }
+
+    // Proof of delivery photos — uploaded by the assigned driver, readable by authenticated order participants
+    match /proof-of-delivery/{driverId}/{allPaths=**} {
+      allow read: if request.auth != null;
+      allow write: if request.auth != null && request.auth.uid == driverId && request.resource.size < 5 * 1024 * 1024;
+    }
+
     match /{allPaths=**} {
       allow read: if true;
       allow write: if request.auth != null && request.resource.size < 5 * 1024 * 1024;
     }
   }
 }
-

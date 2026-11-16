@@ -171,7 +171,7 @@ export function ShopCategoryScreen() {
 
       {/* Sticky header (green bar + sub-aisle pills) */}
       <div className="sticky top-0 z-20 shadow-sm">
-        <header className="bg-[oklch(0.22_0.04_150)] text-white">
+        <header className="bg-[#287d46] text-white">
           <div className="flex items-center gap-3 px-4 pb-3 pt-4">
             <button
               type="button"
@@ -238,7 +238,7 @@ export function ShopCategoryScreen() {
                   className={cn(
                     'flex shrink-0 items-center gap-2 rounded-full py-1 pl-1 pr-3.5 text-[13px] font-bold transition-colors',
                     active
-                      ? 'bg-white text-[oklch(0.22_0.04_150)]'
+                      ? 'bg-white text-[#287d46]'
                       : 'bg-white/10 text-white hover:bg-white/20'
                   )}
                 >

@@ -459,19 +459,27 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   )
   const itemCount = totalItemCount
 
-  // Geocode stores that have an address but no coordinates
+  // Geocode stores that have an address but no coordinates (deduped & parallelized)
   const [, setGeoTick] = useState(0)
 
   useEffect(() => {
     let cancelled = false
+    const missingAddresses = Array.from(
+      new Set(
+        currentRestaurants
+          .filter((r) => !r.coords && r.location)
+          .map((r) => r.location.trim())
+          .filter(Boolean),
+      ),
+    ).slice(0, 12)
+
+    if (missingAddresses.length === 0) return
+
     async function geocodeMissingStores() {
-      let updated = false
-      for (const r of currentRestaurants) {
-        if (!r.coords && r.location) {
-          const found = await geocodeStoreAddress(r.location)
-          if (found) updated = true
-        }
-      }
+      const results = await Promise.allSettled(
+        missingAddresses.map((loc) => geocodeStoreAddress(loc)),
+      )
+      const updated = results.some((r) => r.status === 'fulfilled' && Boolean(r.value))
       if (updated && !cancelled) {
         setGeoTick((t) => t + 1)
       }

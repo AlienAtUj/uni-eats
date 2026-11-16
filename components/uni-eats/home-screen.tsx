@@ -329,25 +329,25 @@ export function HomeScreen() {
   )
 
   return (
-    <div className="min-h-full bg-[#f4f5f2] pb-8">
-      {/* Top Dark Green Header */}
-      <header className="bg-[oklch(0.22_0.04_150)] px-5 pb-5 pt-5 text-[oklch(0.97_0.02_120)]">
+    <div className="min-h-full bg-white pb-8">
+      {/* Clean Uber Eats-Style White Header */}
+      <header className="border-b border-[#E8E8E8] bg-white px-5 pb-4 pt-5 text-[#111111]">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-3">
-            <span className="flex h-11 w-11 shrink-0 items-center justify-center overflow-hidden rounded-full bg-[oklch(0.18_0.04_150)] ring-1 ring-white/15">
+            <span className="flex h-10 w-10 shrink-0 items-center justify-center overflow-hidden rounded-xl bg-[#287d46] ring-1 ring-black/5">
               <Image
                 src="/dash-logo.jpg"
                 alt="Dash"
-                width={44}
-                height={44}
+                width={40}
+                height={40}
                 className="h-full w-full object-cover"
               />
             </span>
             <div>
-              <p className="text-[12px] font-medium leading-tight text-[oklch(0.97_0.02_120)]/75">
+              <p className="text-[11px] font-semibold uppercase tracking-wider text-[#545454]">
                 Stores and Eats ASAP
               </p>
-              <p className="text-[20px] font-extrabold leading-tight tracking-tight text-white">
+              <p className="text-[20px] font-black leading-tight tracking-tight text-[#111111]">
                 Dash
               </p>
             </div>
@@ -356,29 +356,29 @@ export function HomeScreen() {
           <button
             type="button"
             onClick={() => goToScreen('profile')}
-            className="flex h-10 w-10 items-center justify-center rounded-full bg-white/12 text-sm font-bold text-white transition-colors hover:bg-white/20"
+            className="flex h-10 w-10 items-center justify-center rounded-full bg-[#F3F3F3] text-sm font-bold text-[#111111] transition-colors hover:bg-[#E8E8E8]"
             aria-label="Open account"
           >
             {userInitials}
           </button>
         </div>
 
-        {/* Real-Time Delivery Address Selector Pill */}
+        {/* Uber Eats-Style Delivery Address Pill */}
         <button
           type="button"
           onClick={() => setLocationSheetOpen(true)}
-          className="mt-4 flex w-full items-center justify-between rounded-2xl bg-white/10 px-4 py-3 text-left transition-colors hover:bg-white/15 active:scale-[0.99]"
+          className="mt-3.5 flex w-full items-center justify-between rounded-full bg-[#F3F3F3] px-3.5 py-2.5 text-left transition-colors hover:bg-[#EAEAEA] active:scale-[0.99]"
         >
           <span className="flex min-w-0 items-center gap-2.5">
-            <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-[#e59838]/20 text-[#e59838]">
+            <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-[#287d46] text-white">
               {isLocatingGps && !userLocation ? (
-                <span className="inline-block h-4 w-4 animate-spin rounded-full border-2 border-[#e59838] border-t-transparent" />
+                <span className="inline-block h-4 w-4 animate-spin rounded-full border-2 border-white border-t-transparent" />
               ) : (
                 <PinIcon className="h-4 w-4" />
               )}
             </span>
               <div className="flex min-w-0 flex-col">
-                <span className="flex items-center gap-1.5 truncate text-[14px] font-bold text-white">
+                <span className="flex items-center gap-1.5 truncate text-[13.5px] font-bold text-[#111111]">
                   <span>
                     {isLocatingGps && !userLocation
                       ? 'Detecting your location...'
@@ -387,25 +387,25 @@ export function HomeScreen() {
                         : 'Set your delivery address'}
                   </span>
                   {userLocation?.isApproximate && (
-                    <span className="rounded-full bg-amber-400/20 px-1.5 py-0.5 text-[10px] font-semibold text-amber-200">
+                    <span className="rounded-full bg-[#287d46]/12 px-2 py-0.5 text-[10px] font-bold text-[#287d46]">
                       Approximate
                     </span>
                   )}
                 </span>
-                <span className="truncate text-[11px] font-medium text-white/75">
+                <span className="truncate text-[11px] font-medium text-[#545454]">
                   {userLocation
                     ? userLocation.address || 'Delivering to your location'
                     : 'Required to see stores & products near you'}
                 </span>
               </div>
           </span>
-          <ChevronDownIcon className="ml-2 h-4 w-4 shrink-0 text-white/80" />
+          <ChevronDownIcon className="ml-2 h-4 w-4 shrink-0 text-[#111111]" />
         </button>
 
-        {/* Rounded-Full White Search Bar (only active when location is set) */}
+        {/* Uber Eats-Style Search Bar (only active when location is set) */}
         {userLocation && (
-          <div className="mt-3 flex items-center gap-3 rounded-full bg-white px-4 py-3 shadow-sm">
-            <SearchIcon className="h-5 w-5 shrink-0 text-muted-foreground" />
+          <div className="mt-2.5 flex items-center gap-3 rounded-full bg-[#F3F3F3] px-4 py-3">
+            <SearchIcon className="h-5 w-5 shrink-0 text-[#111111]" />
             <input
               value={query}
               onChange={(e) => setQuery(e.target.value)}
@@ -586,15 +586,15 @@ export function HomeScreen() {
       ) : (
         <>
           {/* Segmented Mode Toggle: Eat (Meals) vs Shop (Stores) */}
-          <div className="mx-5 mt-4 grid grid-cols-2 rounded-full bg-[#dce3de] p-1">
+          <div className="mx-5 mt-4 grid grid-cols-2 rounded-full bg-[#f3f3f3] p-1">
             <button
               type="button"
               onClick={() => setHomeMode('eat')}
               className={cn(
                 'flex items-center justify-center gap-2 rounded-full py-2.5 text-sm transition-all',
                 homeMode === 'eat'
-                  ? 'bg-[oklch(0.22_0.04_150)] font-bold text-white shadow-xs'
-                  : 'font-semibold text-[#3b4d41] hover:text-[oklch(0.22_0.04_150)]'
+                  ? 'bg-[#287d46] font-bold text-white shadow-xs'
+                  : 'font-semibold text-[#545454] hover:text-[#111111]'
               )}
             >
               <StoreIcon className="h-4 w-4" />
@@ -607,8 +607,8 @@ export function HomeScreen() {
               className={cn(
                 'flex items-center justify-center gap-2 rounded-full py-2.5 text-sm transition-all',
                 homeMode === 'shop'
-                  ? 'bg-[oklch(0.22_0.04_150)] font-bold text-white shadow-xs'
-                  : 'font-semibold text-[#3b4d41] hover:text-[oklch(0.22_0.04_150)]'
+                  ? 'bg-[#287d46] font-bold text-white shadow-xs'
+                  : 'font-semibold text-[#545454] hover:text-[#111111]'
               )}
             >
               <BagIcon className="h-4 w-4" />
@@ -690,27 +690,32 @@ export function HomeScreen() {
                                 key={r.id}
                                 type="button"
                                 onClick={() => openRestaurant(r.id)}
-                                className="relative h-44 w-full shrink-0 overflow-hidden rounded-3xl bg-card text-left shadow-sm ring-1 ring-black/5 transition-transform active:scale-[0.99]"
+                                className="group flex w-full shrink-0 flex-col text-left"
                               >
-                                <Image
-                                  src={firstDishImg}
-                                  alt={r.name}
-                                  fill
-                                  className="object-cover"
-                                />
-                                <span className="absolute left-3.5 top-3.5 rounded-full bg-[#e07a2e] px-3.5 py-1 text-xs font-extrabold text-[#1a1a1a] shadow-xs">
-                                  Featured
-                                </span>
+                                <div className="relative h-44 w-full overflow-hidden rounded-xl bg-[#F3F3F3]">
+                                  <Image
+                                    src={firstDishImg}
+                                    alt={r.name}
+                                    fill
+                                    className="object-cover transition-transform duration-300 group-hover:scale-105"
+                                  />
+                                  <span className="absolute left-3 top-3 rounded-full bg-[#e07a2e] px-3 py-1 text-[11px] font-bold text-white shadow-2xs">
+                                    Featured
+                                  </span>
+                                </div>
 
-                                <div className="absolute bottom-3 left-3 flex items-center gap-1.5 rounded-full bg-white/95 px-3.5 py-1.5 text-xs font-bold text-foreground shadow-md backdrop-blur-xs">
-                                  <span className="text-[#e59838]">★</span>
-                                  <span>{(r.rating || 5.0).toFixed(1)}</span>
-                                  <span>•</span>
-                                  <span className="font-extrabold text-[#e07a2e]">{r.distance}</span>
-                                  <span>•</span>
-                                  <span>{r.pickupTime}</span>
-                                  <span>•</span>
-                                  <span>{r.deliveryFee}</span>
+                                <div className="mt-2.5 flex items-start justify-between gap-2">
+                                  <div className="min-w-0 flex-1">
+                                    <h3 className="truncate text-[16px] font-bold text-[#111111]">
+                                      {r.name}
+                                    </h3>
+                                    <p className="mt-0.5 truncate text-[12.5px] font-medium text-[#545454]">
+                                      <span className="font-bold text-[#e07a2e]">{r.distance}</span> • {r.deliveryFee} • {r.pickupTime}
+                                    </p>
+                                  </div>
+                                  <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-[#F3F3F3] text-[11px] font-bold text-[#111111]">
+                                    {(r.rating || 5.0).toFixed(1)}
+                                  </span>
                                 </div>
                               </button>
                             )
@@ -765,22 +770,22 @@ export function HomeScreen() {
                       />
                     )}
 
-                    {/* Restaurants near you */}
+                    {/* Restaurants near you (Uber Eats-style feed cards) */}
                     <section className="mt-6">
                       <SectionHeader title="Restaurants near you" />
-                      <div className="flex flex-col gap-3.5 px-5">
+                      <div className="flex flex-col gap-5 px-5">
                         {mealRestaurants.map((r) => (
                           <div
                             key={r.id}
                             className={cn(
-                              'flex items-center gap-4 rounded-3xl bg-white p-3.5 shadow-xs ring-1 ring-border/80',
+                              'group flex flex-col overflow-hidden rounded-xl bg-white ring-1 ring-[#e8e8e8] transition-colors hover:ring-[#d0d0d0]',
                               !r.open && 'opacity-60'
                             )}
                           >
                             <button
                               type="button"
                               onClick={() => openRestaurant(r.id)}
-                              className="relative h-24 w-24 shrink-0 overflow-hidden rounded-2xl text-left"
+                              className="relative h-40 w-full overflow-hidden bg-[#f3f3f3] text-left"
                             >
                               <Image
                                 src={
@@ -790,42 +795,54 @@ export function HomeScreen() {
                                 }
                                 alt={r.name}
                                 fill
-                                className="object-cover"
+                                className="object-cover transition-transform duration-300 group-hover:scale-105"
                               />
+                              <span
+                                className={cn(
+                                  'absolute left-3 top-3 rounded-full px-2.5 py-0.5 text-[11px] font-bold shadow-2xs',
+                                  r.open
+                                    ? 'bg-[#287d46] text-white'
+                                    : 'bg-white/95 text-[#545454]'
+                                )}
+                              >
+                                {r.open ? 'Open now' : 'Closed'}
+                              </span>
                             </button>
 
-                            <div className="flex min-w-0 flex-1 flex-col justify-between">
+                            <div className="p-3.5">
                               <button
                                 type="button"
                                 onClick={() => openRestaurant(r.id)}
-                                className="block text-left"
+                                className="flex w-full items-start justify-between gap-2 text-left"
                               >
-                                <h3 className="truncate text-[16px] font-extrabold text-foreground">
-                                  {r.name}
-                                </h3>
-                                <p className="mt-0.5 text-xs font-medium text-muted-foreground">
-                                  <span className="font-bold text-[#e07a2e]">{r.distance}</span> • {r.deliveryFee} • {r.pickupTime}
-                                </p>
-                                <p className="mt-0.5 text-xs font-semibold text-[#287d46]">
-                                  {r.open ? 'Open now' : 'Closed'}
-                                </p>
+                                <div className="min-w-0 flex-1">
+                                  <h3 className="truncate text-[16px] font-bold text-[#111111]">
+                                    {r.name}
+                                  </h3>
+                                  <p className="mt-0.5 truncate text-[12.5px] font-medium text-[#545454]">
+                                    {r.distance} • {r.deliveryFee} • {r.pickupTime}
+                                  </p>
+                                </div>
+                                <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-[#f3f3f3] text-[11px] font-bold text-[#111111]">
+                                  {(r.rating || 5.0).toFixed(1)}
+                                </span>
                               </button>
 
-                              <div className="mt-2.5 flex items-center gap-2">
+                              <div className="mt-3 flex items-center gap-2">
                                 <button
                                   type="button"
                                   onClick={() => openRestaurant(r.id)}
-                                  className="rounded-full bg-[#287d46] px-3.5 py-1.5 text-xs font-bold text-white shadow-xs transition-all hover:bg-[#216639] active:scale-95"
+                                  className="rounded-full bg-[#287d46] px-4 py-1.5 text-xs font-bold text-white transition-colors hover:bg-[#216639] active:scale-95"
                                 >
-                                  + View Menu
+                                  View Menu
                                 </button>
                                 {r.menu && r.menu.length > 0 && (
                                   <button
                                     type="button"
                                     onClick={() => handleQuickAddFromStore(r)}
-                                    className="rounded-full bg-[#287d46] px-3.5 py-1.5 text-xs font-bold text-white shadow-xs transition-all hover:bg-[#216639] active:scale-95"
+                                    className="rounded-full bg-[#f3f3f3] px-4 py-1.5 text-xs font-bold text-[#111111] transition-colors hover:bg-[#e5e5e5] active:scale-95"
                                   >
-                                    {addedItemId === r.id ? 'Added' : '+ Add'}
+                                    {addedItemId === r.id ? 'Added' : '+ Quick Add'}
                                   </button>
                                 )}
                               </div>
@@ -974,19 +991,19 @@ export function HomeScreen() {
                     {filteredGroceryStores.length > 0 && (
                       <section className="mt-6">
                         <SectionHeader title="Stores near you" />
-                        <div className="flex flex-col gap-4 px-5">
+                        <div className="flex flex-col gap-5 px-5">
                           {filteredGroceryStores.map((store) => (
                             <div
                               key={store.id}
                               className={cn(
-                                'flex items-center gap-4 rounded-3xl bg-white p-3.5 shadow-xs ring-1 ring-border/80',
+                                'group flex flex-col overflow-hidden rounded-xl bg-white ring-1 ring-[#e8e8e8] transition-colors hover:ring-[#d0d0d0]',
                                 !store.open && 'opacity-60'
                               )}
                             >
                               <button
                                 type="button"
                                 onClick={() => openRestaurant(store.id)}
-                                className="relative h-28 w-28 shrink-0 overflow-hidden rounded-2xl text-left"
+                                className="relative h-40 w-full overflow-hidden bg-[#f3f3f3] text-left"
                               >
                                 <Image
                                   src={
@@ -996,46 +1013,58 @@ export function HomeScreen() {
                                   }
                                   alt={store.name}
                                   fill
-                                  className="object-cover transition-transform duration-200 hover:scale-105"
+                                  className="object-cover transition-transform duration-300 group-hover:scale-105"
                                 />
+                                <span
+                                  className={cn(
+                                    'absolute left-3 top-3 rounded-full px-2.5 py-0.5 text-[11px] font-bold shadow-2xs',
+                                    store.open
+                                      ? 'bg-[#287d46] text-white'
+                                      : 'bg-white/95 text-[#545454]'
+                                  )}
+                                >
+                                  {store.open ? 'Open now' : 'Closed'}
+                                </span>
                               </button>
 
-                              <div className="flex min-w-0 flex-1 flex-col justify-between">
+                              <div className="p-3.5">
                                 <button
                                   type="button"
                                   onClick={() => openRestaurant(store.id)}
-                                  className="block text-left"
+                                  className="flex w-full items-start justify-between gap-2 text-left"
                                 >
-                                  <h3 className="truncate text-[17px] font-extrabold text-foreground">
-                                    {store.name}
-                                  </h3>
-                                  <p className="mt-0.5 text-xs font-medium text-muted-foreground">
-                                    <span className="font-bold text-[#e07a2e]">{store.distance}</span> • {store.deliveryFee} • {store.pickupTime}
-                                  </p>
-                                  <p className="mt-0.5 text-xs font-semibold text-[#287d46]">
-                                    {store.open ? 'Open now' : 'Closed'}
-                                  </p>
+                                  <div className="min-w-0 flex-1">
+                                    <h3 className="truncate text-[16px] font-bold text-[#111111]">
+                                      {store.name}
+                                    </h3>
+                                    <p className="mt-0.5 truncate text-[12.5px] font-medium text-[#545454]">
+                                      {store.distance} • {store.deliveryFee} • {store.pickupTime}
+                                    </p>
+                                  </div>
+                                  <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-[#f3f3f3] text-[11px] font-bold text-[#111111]">
+                                    {(store.rating || 5.0).toFixed(1)}
+                                  </span>
                                 </button>
 
-                                <div className="mt-2.5 flex items-center gap-2">
+                                <div className="mt-3 flex items-center gap-2">
                                   <button
                                     type="button"
                                     onClick={() => openRestaurant(store.id)}
-                                    className="rounded-full bg-[#287d46] px-3.5 py-1.5 text-xs font-bold text-white shadow-xs transition-all hover:bg-[#216639] active:scale-95"
+                                    className="rounded-full bg-[#287d46] px-4 py-1.5 text-xs font-bold text-white transition-colors hover:bg-[#216639] active:scale-95"
                                   >
-                                    + View Shop
+                                    View Shop
                                   </button>
                                   <button
                                     type="button"
                                     onClick={() => handleQuickAddFromStore(store)}
                                     className={cn(
-                                      'rounded-full px-3.5 py-1.5 text-xs font-bold text-white shadow-xs transition-all active:scale-95',
+                                      'rounded-full px-4 py-1.5 text-xs font-bold transition-colors active:scale-95',
                                       addedItemId === store.id
-                                        ? 'bg-emerald-700'
-                                        : 'bg-[#287d46] hover:bg-[#216639]'
+                                        ? 'bg-[#216639] text-white'
+                                        : 'bg-[#f3f3f3] text-[#111111] hover:bg-[#e5e5e5]'
                                     )}
                                   >
-                                    {addedItemId === store.id ? 'Added' : '+ Add'}
+                                    {addedItemId === store.id ? 'Added' : '+ Quick Add'}
                                   </button>
                                 </div>
                               </div>
@@ -1416,19 +1445,37 @@ function MealRail({
 }
 
 const PROMO_PALETTES = [
-  { from: '#7a1f1a', to: '#d2452f' },
-  { from: '#1f5a2e', to: '#3f9a4a' },
-  { from: '#8a4b12', to: '#e59838' },
-  { from: '#1a4365', to: '#2b6cb0' },
+  {
+    bg: '#287d46',
+    badgeBg: '#f6b352',
+    badgeText: '#1a2e1f',
+  },
+  {
+    bg: '#e07a2e',
+    badgeBg: '#ffffff',
+    badgeText: '#287d46',
+  },
+  {
+    bg: '#2e9453',
+    badgeBg: '#ffffff',
+    badgeText: '#216639',
+  },
+  {
+    bg: '#d13b2e',
+    badgeBg: '#ffd166',
+    badgeText: '#1a1a1a',
+  },
 ]
 
 interface DynamicPromoSlide {
   id: string
+  badge: string
   eyebrow: string
   title: string
   cta: string
-  from: string
-  to: string
+  bg: string
+  badgeBg: string
+  badgeText: string
   art?: string
   onClick: () => void
 }
@@ -1458,15 +1505,14 @@ function ShopPromoCarousel({
             : 0
         return {
           id: `special-${item.id}-${i}`,
-          eyebrow:
-            savings > 0
-              ? `Save ${formatPrice(savings)} • ${store.name}`
-              : `Special at ${store.name}`,
-          title: `${item.name} now ${formatPrice(item.price)}`,
+          badge: savings > 0 ? `Save ${formatPrice(savings)}` : 'Special',
+          eyebrow: store.name,
+          title: `${item.name} • ${formatPrice(item.price)}`,
           cta: 'Shop Deal',
           art: item.image,
-          from: palette.from,
-          to: palette.to,
+          bg: palette.bg,
+          badgeBg: palette.badgeBg,
+          badgeText: palette.badgeText,
           onClick: () => onOpenItem(item, store),
         }
       })
@@ -1478,14 +1524,14 @@ function ShopPromoCarousel({
         const palette = PROMO_PALETTES[i % PROMO_PALETTES.length]
         return {
           id: `store-${st.id}`,
-          eyebrow: st.distance
-            ? `${st.distance} away • Real-time Delivery`
-            : 'Open Now for Delivery',
+          badge: st.distance ? `${st.distance} away` : 'Open Now',
+          eyebrow: 'Real-time Delivery',
           title: st.name,
           cta: 'View Store',
           art: st.image,
-          from: palette.from,
-          to: palette.to,
+          bg: palette.bg,
+          badgeBg: palette.badgeBg,
+          badgeText: palette.badgeText,
           onClick: () => onOpenStore(st.id),
         }
       })
@@ -1523,35 +1569,43 @@ function ShopPromoCarousel({
             <button
               type="button"
               onClick={p.onClick}
-              className="relative flex h-36 w-full items-center overflow-hidden rounded-3xl p-5 text-left text-white shadow-md transition-transform active:scale-[0.99]"
-              style={{
-                background: `linear-gradient(120deg, ${p.from} 0%, ${p.to} 100%)`,
-              }}
+              className="flex h-40 w-full items-center justify-between gap-3 overflow-hidden rounded-2xl p-4 text-left text-white shadow-md transition-transform active:scale-[0.99]"
+              style={{ backgroundColor: p.bg }}
             >
-              <span className="absolute -right-10 -top-10 h-40 w-40 rounded-full bg-white/10" />
-              <span className="absolute -bottom-12 right-16 h-28 w-28 rounded-full bg-white/10" />
-              <span className="relative z-10 max-w-[62%]">
-                <span className="block truncate text-[11px] font-bold uppercase tracking-wider text-white/80">
-                  {p.eyebrow}
+              {/* Left copy & CTA */}
+              <div className="flex min-w-0 flex-1 flex-col items-start">
+                <span
+                  className="inline-block rounded-md px-2 py-0.5 text-[10px] font-black uppercase tracking-wider"
+                  style={{
+                    backgroundColor: p.badgeBg,
+                    color: p.badgeText,
+                  }}
+                >
+                  {p.badge}
                 </span>
-                <span className="mt-1 line-clamp-2 text-lg font-extrabold leading-tight">
+                <span className="mt-1.5 line-clamp-2 text-[19px] font-black leading-[1.12] tracking-tight text-white">
                   {p.title}
                 </span>
-                <span className="mt-2.5 inline-flex items-center gap-1 rounded-full bg-white px-3 py-1.5 text-xs font-extrabold text-[oklch(0.22_0.04_150)]">
+                <span className="mt-1 block max-w-full truncate text-[11px] font-semibold text-white/85">
+                  {p.eyebrow}
+                </span>
+                <span className="mt-2.5 inline-flex items-center gap-1 rounded-full bg-white px-3.5 py-1.5 text-[11px] font-extrabold text-[#287d46] shadow-xs">
                   {p.cta}
                   <ChevronRightIcon className="h-3.5 w-3.5" />
                 </span>
-              </span>
+              </div>
+
+              {/* Clean, crisp right-side product/store image (no gradient wash) */}
               {p.art && (
-                <span className="absolute bottom-3 right-4 h-24 w-24 rotate-6 overflow-hidden rounded-2xl shadow-lg ring-4 ring-white/30">
+                <div className="relative h-28 w-28 shrink-0 overflow-hidden rounded-2xl shadow-md ring-2 ring-white/20">
                   <Image
                     src={p.art}
                     alt=""
                     fill
-                    sizes="96px"
-                    className="object-cover"
+                    sizes="112px"
+                    className="object-cover object-center"
                   />
-                </span>
+                </div>
               )}
             </button>
           </div>

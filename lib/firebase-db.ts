@@ -86,13 +86,17 @@ export interface Order {
 // PRODUCTS – SWR HOOK
 // ============================================================
 
-const fetcher = async (path: string): Promise<ProductDoc[]> => {
+const productsFetcher = async (key: string): Promise<ProductDoc[]> => {
   try {
-    const collectionRef = collection(db, path)
-    const snapshot = await getDocs(collectionRef)
+    const collectionRef = collection(db, 'products')
+    const merchantId = key.startsWith('products:') ? key.slice('products:'.length) : ''
+    const q = merchantId
+      ? query(collectionRef, where('merchantId', '==', merchantId))
+      : query(collectionRef, limit(300))
+    const snapshot = await getDocs(q)
     const docs = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as ProductDoc))
     docs.sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0))
-    return docs.slice(0, 100)
+    return docs
   } catch (err: any) {
     if (err?.code !== 'permission-denied') {
       console.warn('Firestore products fetch warning:', err?.message || err)
@@ -101,9 +105,15 @@ const fetcher = async (path: string): Promise<ProductDoc[]> => {
   }
 }
 
-/** Fetch all products from Firestore efficiently relying on SWR cache */
-export function useFirebaseProducts() {
-  const { data, error, mutate } = useSWR<ProductDoc[]>('products', fetcher, {
+/**
+ * Fetch products from Firestore relying on SWR cache.
+ * When `merchantId` is provided, queries ONLY that store's products (slashes reads & scales cleanly).
+ * Pass `null` while auth is loading to avoid an unnecessary platform-wide query.
+ */
+export function useFirebaseProducts(merchantId?: string | null) {
+  const swrKey =
+    merchantId === null ? null : merchantId ? `products:${merchantId}` : 'products'
+  const { data, error, mutate } = useSWR<ProductDoc[]>(swrKey, productsFetcher, {
     revalidateOnFocus: false,
     dedupingInterval: 300000,
     shouldRetryOnError: false,
@@ -111,7 +121,7 @@ export function useFirebaseProducts() {
 
   return {
     products: data || [],
-    isLoading: !error && !data,
+    isLoading: Boolean(swrKey) && !error && !data,
     isError: error,
     mutate
   }
@@ -331,7 +341,7 @@ export function useFirebaseRestaurants() {
 // PRODUCTS – ACTIONS
 // ============================================================
 
-function compressImageFile(file: File, maxSize = 1200, quality = 0.72): Promise<string> {
+function compressImageFile(file: File, maxSize = 960, quality = 0.72): Promise<string> {
   return new Promise((resolve, reject) => {
     const image = new Image()
     const objectUrl = URL.createObjectURL(file)
@@ -357,7 +367,19 @@ function compressImageFile(file: File, maxSize = 1200, quality = 0.72): Promise<
   })
 }
 
-/** Upload product images via same-origin API (avoids Firebase Storage browser CORS). */
+async function compressImageToUploadFile(file: File, maxSize = 960, quality = 0.74): Promise<File> {
+  try {
+    const dataUrl = await compressImageFile(file, maxSize, quality)
+    const res = await fetch(dataUrl)
+    const blob = await res.blob()
+    const safeBase = file.name.replace(/\.[^.]+$/, '') || 'product'
+    return new File([blob], `${safeBase}.jpg`, { type: 'image/jpeg' })
+  } catch {
+    return file
+  }
+}
+
+/** Upload compressed product images via same-origin API (slashes Storage & bandwidth costs). */
 export async function uploadProductImages(files: File[], merchantId: string): Promise<string[]> {
   if (!merchantId) {
     throw new Error('merchantId is required – user might not be logged in as merchant.')
@@ -367,9 +389,12 @@ export async function uploadProductImages(files: File[], merchantId: string): Pr
     throw new Error('You must be signed in to upload product images.')
   }
 
+  // Always compress smartphone photos client-side BEFORE upload (~90% smaller storage & egress)
+  const compressedFiles = await Promise.all(files.map((file) => compressImageToUploadFile(file)))
+
   const token = await auth.currentUser.getIdToken()
   const formData = new FormData()
-  for (const file of files) {
+  for (const file of compressedFiles) {
     formData.append('files', file)
   }
 
@@ -389,8 +414,8 @@ export async function uploadProductImages(files: File[], merchantId: string): Pr
     throw new Error(payload.error || 'Upload failed.')
   }
 
-  // Storage bucket does not exist yet — keep product creation working with compressed images.
-  return Promise.all(files.map((file) => compressImageFile(file)))
+  // Last-resort compact fallback if neither Firebase nor Supabase storage is active
+  return Promise.all(compressedFiles.map((file) => compressImageFile(file, 640, 0.65)))
 }
 
 function sanitizeModifierGroups(groups: any[] | undefined): any[] {
@@ -658,7 +683,8 @@ export async function getMerchantOrders(merchantId: string): Promise<Order[]> {
     const q = query(
       ordersRef,
       where('merchantId', '==', merchantId),
-      orderBy('createdAt', 'desc')
+      orderBy('createdAt', 'desc'),
+      limit(100)
     )
     const snapshot = await getDocs(q)
     return snapshot.docs.map(doc => ({

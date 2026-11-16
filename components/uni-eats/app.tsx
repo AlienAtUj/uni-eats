@@ -39,7 +39,7 @@ function AuthSessionGate() {
 function BrandedAuthSplash() {
   return (
     <div className="flex h-full min-h-[70vh] flex-col items-center justify-center gap-4 bg-background px-6 text-center">
-      <div className="flex h-16 w-16 items-center justify-center overflow-hidden rounded-2xl bg-[oklch(0.22_0.04_150)] shadow-md ring-1 ring-border/50">
+      <div className="flex h-16 w-16 items-center justify-center overflow-hidden rounded-2xl bg-[#287d46] shadow-md ring-1 ring-border/50">
         <Image
           src="/dash-logo.jpg"
           alt="Dash"
@@ -96,9 +96,9 @@ function CustomerShell() {
   const hideNav = isAuthLoading || !user || userRole === 'merchant'
 
   return (
-    <div className="flex h-dvh justify-center bg-[oklch(0.16_0.03_150)] md:h-auto md:min-h-dvh md:py-8">
+    <div className="flex h-dvh justify-center bg-[#f3f3f3] md:h-auto md:min-h-dvh md:py-8">
       {/* Phone frame */}
-      <div className="relative flex h-full w-full max-w-md flex-col overflow-hidden bg-background shadow-2xl md:h-[860px] md:rounded-[2.75rem] md:ring-8 md:ring-[oklch(0.12_0.02_150)]">
+      <div className="relative flex h-full w-full max-w-md flex-col overflow-hidden bg-background shadow-2xl md:h-[860px] md:rounded-[2.75rem] md:ring-8 md:ring-[#e2e2e2]">
         <main className="min-h-0 flex-1 overflow-y-auto overscroll-contain">
           <Screens />
         </main>

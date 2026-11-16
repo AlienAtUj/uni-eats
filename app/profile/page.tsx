@@ -38,8 +38,8 @@ export default function ProfilePage() {
   }
 
   return (
-    <div className="flex min-h-dvh justify-center bg-[oklch(0.16_0.03_150)] md:min-h-dvh md:py-8 lg:py-12">
-      <div className="relative flex h-full min-h-dvh w-full max-w-md flex-col overflow-hidden bg-background shadow-2xl md:h-[860px] md:min-h-[860px] md:rounded-[2.75rem] md:ring-8 md:ring-[oklch(0.12_0.02_150)]">
+    <div className="flex min-h-dvh justify-center bg-[#f3f3f3] md:min-h-dvh md:py-8 lg:py-12">
+      <div className="relative flex h-full min-h-dvh w-full max-w-md flex-col overflow-hidden bg-background shadow-2xl md:h-[860px] md:min-h-[860px] md:rounded-[2.75rem] md:ring-8 md:ring-[#e2e2e2]">
         <main className="flex-1 overflow-y-auto overscroll-contain">
           {isLoading || !user ? (
             <div className="flex h-full min-h-[50vh] items-center justify-center">

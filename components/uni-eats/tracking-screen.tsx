@@ -1,8 +1,10 @@
 'use client'
 
-import { useEffect, useState } from 'react'
-import { formatPrice } from '@/lib/data'
+import { useEffect, useMemo, useState } from 'react'
+import { formatPrice, restaurants as initialRestaurants } from '@/lib/data'
+import { geocodeStoreAddress, resolveStoreCoords, type Coordinates } from '@/lib/location'
 import { useStore } from './store'
+import { OrderTrackingMap } from './order-tracking-map'
 import {
   CheckIcon,
   ClockIcon,
@@ -11,7 +13,7 @@ import {
 } from '@/components/icons'
 import { cn } from '@/lib/utils'
 
-import { subscribeToOrder, updateOrderStatus, type OrderStatus } from '@/lib/firebase-db'
+import { subscribeToOrder, updateOrderStatus, useFirebaseRestaurants } from '@/lib/firebase-db'
 
 const stages = [
   { key: 'pending', title: 'Order confirmed', desc: 'The restaurant received your order.' },
@@ -28,9 +30,68 @@ const statusToIndex: Record<string, number> = {
 }
 
 export function TrackingScreen() {
-  const { placedOrder, goHome } = useStore()
+  const { placedOrder, userLocation, goHome } = useStore()
+  const { restaurants: fbRestaurants } = useFirebaseRestaurants()
   const [current, setCurrent] = useState(0)
   const [isUpdatingStatus, setIsUpdatingStatus] = useState(false)
+  const [geocodedShopCoords, setGeocodedShopCoords] = useState<Coordinates | null>(null)
+
+  const restaurants = useMemo(
+    () => (fbRestaurants.length > 0 ? fbRestaurants : initialRestaurants),
+    [fbRestaurants]
+  )
+
+  const customerCoords = useMemo(
+    () => userLocation?.coords ?? { lat: -26.2041, lng: 28.0473 },
+    [userLocation]
+  )
+
+  const orderStore = useMemo(() => {
+    if (!placedOrder) return undefined
+    const storeId = placedOrder.lines[0]?.restaurantId
+    return (
+      restaurants.find((r) => storeId && r.id === storeId) ||
+      restaurants.find((r) => r.name === placedOrder.restaurantName)
+    )
+  }, [placedOrder, restaurants])
+
+  // If the ordered store has a street address without stored coords, geocode it in real time
+  useEffect(() => {
+    setGeocodedShopCoords(null)
+    if (!orderStore || orderStore.coords || !orderStore.location) return
+    let cancelled = false
+    geocodeStoreAddress(orderStore.location).then((coords) => {
+      if (!cancelled && coords) {
+        setGeocodedShopCoords(coords)
+      }
+    })
+    return () => {
+      cancelled = true
+    }
+  }, [orderStore])
+
+  const shopCoords = useMemo<Coordinates>(() => {
+    if (orderStore?.coords) return orderStore.coords
+    if (geocodedShopCoords) return geocodedShopCoords
+    if (orderStore) return resolveStoreCoords(orderStore)
+    return {
+      lat: customerCoords.lat + 0.014,
+      lng: customerCoords.lng - 0.012,
+    }
+  }, [orderStore, geocodedShopCoords, customerCoords])
+
+  const nearbyShops = useMemo(
+    () =>
+      restaurants
+        .filter((r) => r.id !== orderStore?.id)
+        .slice(0, 8)
+        .map((r) => ({
+          id: r.id,
+          name: r.name,
+          coords: r.coords ?? resolveStoreCoords(r),
+        })),
+    [restaurants, orderStore?.id]
+  )
 
   useEffect(() => {
     if (!placedOrder) return
@@ -93,32 +154,65 @@ export function TrackingScreen() {
   const o = placedOrder
 
   return (
-    <div className="pb-6">
-      <header className="bg-[oklch(0.22_0.04_150)] px-5 pb-8 pt-6 text-[oklch(0.97_0.02_120)]">
-        <p className="text-[11px] font-medium text-[oklch(0.97_0.02_120)]/70">
-          Order {o.id}
-        </p>
-        <h1 className="mt-1 text-2xl font-extrabold tracking-tight">
+    <div className="min-h-full bg-white pb-6">
+      {/* Uber Eats-Style Clean White Order Header */}
+      <header className="border-b border-[#E8E8E8] bg-white px-5 pb-4 pt-5 text-[#111111]">
+        <div className="flex items-center justify-between">
+          <p className="text-[11px] font-bold uppercase tracking-wider text-[#545454]">
+            Order {o.id}
+          </p>
+          <span className="rounded-full bg-[#287d46]/12 px-2.5 py-0.5 text-[11px] font-bold text-[#287d46]">
+            {current >= 2 ? 'Ready now' : '10 – 15 min'}
+          </span>
+        </div>
+        <h1 className="mt-1 text-2xl font-black tracking-tight text-[#111111]">
           {stages[current].title}
         </h1>
-        <p className="mt-1 text-sm text-[oklch(0.97_0.02_120)]/75">
+        <p className="mt-0.5 text-sm font-medium text-[#545454]">
           {stages[current].desc}
         </p>
-        <div className="mt-5 flex items-center gap-2 rounded-2xl bg-[oklch(0.97_0.02_120)]/10 px-4 py-3">
-          <ClockIcon className="h-5 w-5 text-accent" />
+
+        {/* Uber Eats-style 4-segment green progress bar */}
+        <div className="mt-4 grid grid-cols-4 gap-1.5">
+          {stages.map((s, idx) => (
+            <span
+              key={s.key}
+              className={cn(
+                'h-1.5 rounded-full transition-colors',
+                idx <= current ? 'bg-[#287d46]' : 'bg-[#E8E8E8]'
+              )}
+            />
+          ))}
+        </div>
+
+        {/* Clean Neutral ETA Row (replaces dark green box) */}
+        <div className="mt-3.5 flex items-center gap-3 rounded-xl bg-[#F3F3F3] px-3.5 py-2.5">
+          <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-[#287d46] text-white">
+            <ClockIcon className="h-4 w-4" />
+          </span>
           <div>
-            <span className="block text-[11px] text-[oklch(0.97_0.02_120)]/60">
-              Estimated ready time
+            <span className="block text-[11px] font-medium text-[#545454]">
+              Estimated arrival
             </span>
-            <span className="block text-sm font-bold">
+            <span className="block text-sm font-bold text-[#111111]">
               {current >= 2 ? 'Ready now' : '10 – 15 minutes'}
             </span>
           </div>
         </div>
       </header>
 
+      {/* Real-time Uber Eats-style Color Tracking Map */}
+      <OrderTrackingMap
+        orderId={o.id}
+        shopName={o.restaurantName}
+        shopCoords={shopCoords}
+        customerCoords={customerCoords}
+        nearbyShops={nearbyShops}
+        orderStage={current}
+      />
+
       {/* Progress tracker */}
-      <div className="-mt-4 rounded-t-3xl bg-background px-5 pt-6">
+      <div className="-mt-4 relative z-10 rounded-t-3xl bg-white px-5 pt-6">
         <ol className="relative flex flex-col">
           {stages.map((stage, i) => {
             const done = i < current

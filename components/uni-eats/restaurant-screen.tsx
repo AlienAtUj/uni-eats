@@ -72,7 +72,7 @@ export function RestaurantScreen() {
       : sections.filter(([s]) => s === activeSection)
 
   return (
-    <div className="min-h-full bg-[#f4f5f2] pb-6">
+    <div className="min-h-full bg-white pb-6">
       {/* Cover */}
       <div className="relative h-48 w-full">
         <Image
@@ -97,7 +97,7 @@ export function RestaurantScreen() {
       </div>
 
       {/* Info card */}
-      <div className="relative -mt-6 rounded-t-3xl bg-[#f4f5f2] px-4 pt-5">
+      <div className="relative -mt-6 rounded-t-3xl bg-white px-4 pt-5">
         <h1 className="text-2xl font-extrabold tracking-tight text-foreground">
           {r.name}
         </h1>

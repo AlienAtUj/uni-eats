@@ -31,16 +31,40 @@ service cloud.firestore {
       allow update, delete: if isAuthenticated() && (resource.data.merchantId == request.auth.uid || resource == null);
     }
 
-    // Customer & Merchant Orders
+    // Driver profiles & real-time telemetry
+    match /drivers/{driverId} {
+      allow read: if isOwner(driverId);
+      allow create: if isOwner(driverId) && request.resource.data.isOnline == false;
+      allow update: if isOwner(driverId) && (
+        request.resource.data.isOnline == false ||
+        resource.data.verificationStatus == 'approved' ||
+        request.resource.data.verificationStatus == 'approved'
+      );
+      allow delete: if false;
+    }
+
+    // Driver ratings & reviews (read-only for the target driver)
+    match /driverReviews/{reviewId} {
+      allow read: if isAuthenticated() && resource.data.driverId == request.auth.uid;
+      allow create: if isAuthenticated() && request.resource.data.customerId == request.auth.uid;
+      allow update, delete: if false;
+    }
+
+    // Customer, Merchant & Driver Orders
+    // Drivers can ONLY read/update orders currently offered to them or assigned to them
     match /orders/{orderId} {
       allow read: if isAuthenticated() && (
         resource.data.customerId == request.auth.uid ||
-        resource.data.merchantId == request.auth.uid
+        resource.data.merchantId == request.auth.uid ||
+        resource.data.driverId == request.auth.uid ||
+        resource.data.offeredToDriverId == request.auth.uid
       );
       allow create: if isAuthenticated() && request.resource.data.customerId == request.auth.uid;
       allow update: if isAuthenticated() && (
         resource.data.customerId == request.auth.uid ||
-        resource.data.merchantId == request.auth.uid
+        resource.data.merchantId == request.auth.uid ||
+        resource.data.driverId == request.auth.uid ||
+        resource.data.offeredToDriverId == request.auth.uid
       );
       allow delete: if false; // Orders should never be deleted by clients
     }
@@ -51,4 +75,3 @@ service cloud.firestore {
     }
   }
 }
-

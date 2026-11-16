@@ -25,7 +25,11 @@
   --color-ring: var(--ring);
   --color-brand: var(--brand);
   --color-brand-foreground: var(--brand-foreground);
-  --font-sans: var(--font-jakarta), ui-sans-serif, system-ui, sans-serif;
+  --color-surface-shell: var(--surface-shell);
+  --color-surface-frame: var(--surface-frame);
+  --color-surface-header: var(--surface-header);
+  --color-surface-header-fg: var(--surface-header-fg);
+  --font-sans: 'Satoshi', var(--font-jakarta), ui-sans-serif, system-ui, sans-serif;
   --radius-sm: calc(var(--radius) * 0.6);
   --radius-md: calc(var(--radius) * 0.8);
   --radius-lg: var(--radius);
@@ -38,37 +42,43 @@
   color-scheme: light;
   --radius: 0.875rem;
 
-  /* warm light neutral background */
-  --background: oklch(0.975 0.006 95);
-  --foreground: oklch(0.205 0.012 260);
+  /* clean Uber Eats-inspired monochrome canvas */
+  --background: #ffffff;
+  --foreground: #111111;
 
-  --card: oklch(1 0 0);
-  --card-foreground: oklch(0.205 0.012 260);
-  --popover: oklch(1 0 0);
-  --popover-foreground: oklch(0.205 0.012 260);
+  --card: #ffffff;
+  --card-foreground: #111111;
+  --popover: #ffffff;
+  --popover-foreground: #111111;
 
-  /* UniEats green */
-  --primary: oklch(0.55 0.135 150);
-  --primary-foreground: oklch(0.99 0.01 120);
+  /* Dash green */
+  --primary: #287d46;
+  --primary-foreground: #ffffff;
 
-  --secondary: oklch(0.955 0.008 120);
-  --secondary-foreground: oklch(0.26 0.012 260);
+  --secondary: #f3f3f3;
+  --secondary-foreground: #111111;
 
-  --muted: oklch(0.955 0.006 110);
-  --muted-foreground: oklch(0.52 0.012 260);
+  --muted: #f3f3f3;
+  --muted-foreground: #545454;
 
-  /* UniEats orange accent */
+  /* Dash orange accent */
   --accent: oklch(0.72 0.16 55);
   --accent-foreground: oklch(0.2 0.02 60);
 
-  --brand: oklch(0.55 0.135 150);
-  --brand-foreground: oklch(0.99 0.01 120);
+  --brand: #287d46;
+  --brand-foreground: #ffffff;
+
+  /* Dash phone shell & vibrant green header tokens */
+  --surface-shell: #f3f3f3;
+  --surface-frame: #e2e2e2;
+  --surface-header: #287d46;
+  --surface-header-fg: #ffffff;
 
   --destructive: oklch(0.585 0.2 25);
 
-  --border: oklch(0.915 0.006 110);
-  --input: oklch(0.915 0.006 110);
-  --ring: oklch(0.55 0.135 150);
+  --border: #e8e8e8;
+  --input: #e8e8e8;
+  --ring: #287d46;
 }
 
 @layer base {
@@ -76,7 +86,8 @@
     @apply border-border outline-ring/50;
   }
   body {
-    @apply bg-background text-foreground;
+    @apply bg-background text-foreground font-sans;
+    font-family: var(--font-sans);
   }
   /* hide scrollbars on horizontal scroll rows */
   .no-scrollbar::-webkit-scrollbar {

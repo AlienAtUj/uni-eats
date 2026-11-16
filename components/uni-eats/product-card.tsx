@@ -110,7 +110,7 @@ export function QtyControl({
         }}
         aria-label="Add to cart"
         className={cn(
-          'flex items-center justify-center rounded-full bg-[#287d46] text-white shadow-md ring-2 ring-white transition-transform active:scale-90',
+          'flex items-center justify-center rounded-full bg-[#287d46] text-white shadow-md ring-2 ring-white transition-transform hover:bg-[#216639] active:scale-90',
           btn
         )}
       >
@@ -147,7 +147,7 @@ export function QtyControl({
   )
 }
 
-/** Checkers-style product/meal tile: image, add/stepper, price, name, size/subtitle. */
+/** Uber Eats-style food/product card: clean full-bleed rounded-xl photo, white circular + button, dish name first, price & store below. */
 export function ProductCard({
   item,
   store,
@@ -174,57 +174,57 @@ export function ProductCard({
       onClick={() => onOpen?.(item, store)}
       onKeyDown={(e) => e.key === 'Enter' && onOpen?.(item, store)}
       className={cn(
-        'group flex cursor-pointer flex-col overflow-hidden rounded-2xl bg-white shadow-xs ring-1 ring-black/5 transition-shadow hover:shadow-md',
+        'group flex cursor-pointer flex-col bg-white',
         className
       )}
     >
       <div
         className={cn(
-          'relative w-full overflow-hidden bg-white',
-          packshot ? 'aspect-square' : 'aspect-[4/4]'
+          'relative w-full overflow-hidden rounded-xl bg-[#F3F3F3]',
+          packshot ? 'aspect-square' : 'aspect-square'
         )}
       >
         <div
           className={cn(
             'absolute overflow-hidden',
-            packshot ? 'inset-2 rounded-xl' : 'inset-1.5 rounded-xl bg-muted/20'
+            packshot ? 'inset-2 rounded-lg bg-white' : 'inset-0'
           )}
         >
           <ProductImage item={item} className="transition-transform duration-300 group-hover:scale-105" />
         </div>
 
         {onSpecial && (
-          <span className="absolute left-3 top-3 rounded-md bg-[#e23b2e] px-1.5 py-0.5 text-[10px] font-extrabold uppercase tracking-wide text-white shadow-2xs">
+          <span className="absolute left-2.5 top-2.5 rounded-md bg-[#e23b2e] px-2 py-0.5 text-[10px] font-bold tracking-wide text-white shadow-2xs">
             Save R{saving.toFixed(0)}
           </span>
         )}
 
-        <div className="absolute bottom-3 right-3">
+        <div className="absolute bottom-2.5 right-2.5">
           <QtyControl qty={qty} onInc={inc} onDec={dec} />
         </div>
       </div>
 
-      <div className="flex flex-1 flex-col px-3 pb-3 pt-1.5">
-        <div className="flex items-baseline gap-1.5">
+      <div className="flex flex-1 flex-col pt-2">
+        <p className="line-clamp-2 text-[14px] font-bold leading-snug text-[#111111]">
+          {item.name}
+        </p>
+        <div className="mt-0.5 flex items-baseline gap-1.5">
           <span
             className={cn(
-              'text-[15px] font-extrabold tracking-tight',
-              onSpecial ? 'text-[#e23b2e]' : 'text-foreground'
+              'text-[13px] font-semibold tracking-tight',
+              onSpecial ? 'text-[#e23b2e]' : 'text-[#111111]'
             )}
           >
             {formatPrice(item.price)}
           </span>
           {onSpecial && (
-            <span className="text-[11px] font-semibold text-muted-foreground line-through">
+            <span className="text-[11px] font-medium text-[#757575] line-through">
               {formatPrice(item.oldPrice as number)}
             </span>
           )}
         </div>
-        <p className="mt-0.5 line-clamp-2 text-[12.5px] font-semibold leading-snug text-foreground">
-          {item.name}
-        </p>
         {metaText && (
-          <p className="mt-auto truncate pt-1 text-[11px] font-medium text-muted-foreground">
+          <p className="mt-0.5 truncate text-[11.5px] font-medium text-[#545454]">
             {metaText}
           </p>
         )}
@@ -273,7 +273,7 @@ function ProductSheetInner({
               <button
                 type="button"
                 onClick={onClose}
-                className="flex-1 rounded-full bg-[oklch(0.22_0.04_150)] py-3.5 text-sm font-bold text-white"
+                className="flex-1 rounded-full bg-[#287d46] py-3.5 text-sm font-bold text-white"
               >
                 Done · {formatPrice(item.price * qty)}
               </button>

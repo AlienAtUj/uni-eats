@@ -38,7 +38,7 @@ export default function LoginPage() {
   return (
     <div className="flex min-h-full flex-col bg-background px-6 py-8">
       <div className="mb-8 mt-2 text-center">
-        <div className="mx-auto mb-6 flex h-20 w-20 items-center justify-center overflow-hidden rounded-[1.5rem] bg-[oklch(0.22_0.04_150)] shadow-sm ring-1 ring-border/50">
+        <div className="mx-auto mb-6 flex h-20 w-20 items-center justify-center overflow-hidden rounded-[1.5rem] bg-[#287d46] shadow-sm ring-1 ring-border/50">
           <Image 
             src="/dash-logo.jpg" 
             alt="Dash" 

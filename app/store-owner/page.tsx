@@ -127,7 +127,7 @@ export default function StoreOwnerDashboard() {
   const [orders, setOrders] = useState<Order[]>([])
   const [isLoadingOrders, setIsLoadingOrders] = useState(false)
 
-  const { products: fbProducts, mutate } = useFirebaseProducts()
+  const { products: fbProducts, mutate } = useFirebaseProducts(merchantId)
   const allProducts = useMemo(
     () =>
       merchantId
@@ -515,9 +515,9 @@ export default function StoreOwnerDashboard() {
     storeType === 'grocery' ? 'Shop / Grocery Owner' : 'Restaurant Owner'
 
   return (
-    <div className="flex h-dvh justify-center bg-[oklch(0.16_0.03_150)] md:h-auto md:min-h-dvh md:py-8">
+    <div className="flex h-dvh justify-center bg-[#f3f3f3] md:h-auto md:min-h-dvh md:py-8">
       {/* Same Phone Frame Shell as Student App */}
-      <div className="relative flex h-full w-full max-w-md flex-col overflow-hidden bg-background shadow-2xl md:h-[860px] md:rounded-[2.75rem] md:ring-8 md:ring-[oklch(0.12_0.02_150)]">
+      <div className="relative flex h-full w-full max-w-md flex-col overflow-hidden bg-background shadow-2xl md:h-[860px] md:rounded-[2.75rem] md:ring-8 md:ring-[#e2e2e2]">
         {isCheckingAccess ? (
           <div className="flex flex-1 items-center justify-center">
             <div className="h-8 w-8 animate-spin rounded-full border-4 border-primary border-t-transparent" />
@@ -526,7 +526,7 @@ export default function StoreOwnerDashboard() {
           <>
             <main className="min-h-0 flex-1 overflow-y-auto overscroll-contain pb-6">
               {/* Top Header (matches HomeScreen) */}
-              <header className="bg-[oklch(0.22_0.04_150)] px-5 pb-6 pt-5 text-[oklch(0.97_0.02_120)]">
+              <header className="bg-[#287d46] px-5 pb-6 pt-5 text-white">
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-2.5 min-w-0">
                     <span className="flex h-9 w-9 shrink-0 items-center justify-center overflow-hidden rounded-xl bg-[oklch(0.97_0.02_120)]/10">
