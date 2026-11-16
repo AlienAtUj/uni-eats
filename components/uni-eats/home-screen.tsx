@@ -1355,7 +1355,7 @@ function ProductRail({
               />
             </span>
           )}
-          <h2 className="text-[19px] font-extrabold tracking-tight text-foreground">
+          <h2 className="text-[21px] font-black tracking-tight text-foreground">
             {title}
           </h2>
         </button>
@@ -1363,10 +1363,10 @@ function ProductRail({
           <button
             type="button"
             onClick={onViewAll}
-            className="flex items-center gap-0.5 rounded-full bg-[#287d46]/10 px-3 py-1 text-xs font-bold text-[#287d46] transition-colors hover:bg-[#287d46]/20"
+            className="flex items-center gap-1 rounded-full bg-[#287d46]/10 px-4 py-2 text-[13.5px] font-bold text-[#287d46] transition-colors hover:bg-[#287d46]/20 active:scale-95"
           >
             View all
-            <ChevronRightIcon className="h-3.5 w-3.5" />
+            <ChevronRightIcon className="h-4 w-4" />
           </button>
         )}
       </div>
@@ -1423,7 +1423,7 @@ function MealRail({
               />
             </span>
           )}
-          <h2 className="text-[19px] font-extrabold tracking-tight text-foreground">
+          <h2 className="text-[21px] font-black tracking-tight text-foreground">
             {title}
           </h2>
         </button>
@@ -1431,10 +1431,10 @@ function MealRail({
           <button
             type="button"
             onClick={onViewAll}
-            className="flex items-center gap-0.5 rounded-full bg-[#287d46]/10 px-3 py-1 text-xs font-bold text-[#287d46] transition-colors hover:bg-[#287d46]/20"
+            className="flex items-center gap-1 rounded-full bg-[#287d46]/10 px-4 py-2 text-[13.5px] font-bold text-[#287d46] transition-colors hover:bg-[#287d46]/20 active:scale-95"
           >
             View all
-            <ChevronRightIcon className="h-3.5 w-3.5" />
+            <ChevronRightIcon className="h-4 w-4" />
           </button>
         )}
       </div>
