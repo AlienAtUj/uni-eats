@@ -34,15 +34,15 @@ export function BottomNav() {
                 type="button"
                 onClick={() => goToScreen(target)}
                 className={cn(
-                  'relative flex w-full flex-col items-center gap-1 rounded-xl py-1.5 text-[11px] transition-colors',
-                  active ? 'font-bold text-[#287d46]' : 'font-medium text-[#545454]',
+                  'relative flex w-full flex-col items-center gap-1 rounded-xl py-2 text-xs transition-colors',
+                  active ? 'font-bold text-[#287d46]' : 'font-semibold text-[#545454]',
                 )}
                 aria-current={active ? 'page' : undefined}
               >
                 <span className="relative">
-                  <Icon className="h-6 w-6" />
+                  <Icon className="h-[26px] w-[26px]" />
                   {key === 'cart' && itemCount > 0 && (
-                    <span className="absolute -right-2 -top-1.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-[#e07a2e] px-1 text-[10px] font-bold text-white">
+                    <span className="absolute -right-2 -top-1.5 flex h-4.5 min-w-4.5 items-center justify-center rounded-full bg-[#e07a2e] px-1 text-[10px] font-bold text-white">
                       {itemCount}
                     </span>
                   )}

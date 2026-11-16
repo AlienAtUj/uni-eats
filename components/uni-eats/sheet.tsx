@@ -43,7 +43,7 @@ export function BottomSheet({
             type="button"
             onClick={onClose}
             aria-label="Close"
-            className="flex h-8 w-8 items-center justify-center rounded-full bg-secondary text-secondary-foreground"
+            className="flex h-9 w-9 items-center justify-center rounded-full bg-secondary text-secondary-foreground"
           >
             <CloseIcon className="h-4 w-4" />
           </button>

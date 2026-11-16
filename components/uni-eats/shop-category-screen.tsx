@@ -177,7 +177,7 @@ export function ShopCategoryScreen() {
               type="button"
               onClick={goHome}
               aria-label="Back to home"
-              className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-white/12 transition-colors hover:bg-white/20"
+              className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-white/12 transition-colors hover:bg-white/20"
             >
               <ArrowLeftIcon className="h-5 w-5" />
             </button>
@@ -243,7 +243,7 @@ export function ShopCategoryScreen() {
                   )}
                 >
                   <span
-                    className="relative h-7 w-7 overflow-hidden rounded-full"
+                    className="relative h-8 w-8 overflow-hidden rounded-full ring-1 ring-black/10"
                     style={{ backgroundColor: d.bg }}
                   >
                     <Image src={d.icon} alt="" fill sizes="28px" className="object-cover" />

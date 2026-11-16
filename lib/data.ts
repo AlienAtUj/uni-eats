@@ -57,6 +57,8 @@ export type Restaurant = {
   storeType?: StoreType
   coords?: Coordinates
   deliveryRadiusKm?: number
+  inStorePricePromiseAccepted?: boolean
+  sponsoredTop3Active?: boolean
   menu: MenuItem[]
 }
 

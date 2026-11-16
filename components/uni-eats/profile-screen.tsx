@@ -40,7 +40,7 @@ export function ProfileScreen() {
       <header className="mb-8">
         <button 
           onClick={goHome}
-          className="inline-flex h-10 w-10 items-center justify-center rounded-full bg-muted/50 text-foreground transition-colors hover:bg-muted"
+          className="inline-flex h-11 w-11 items-center justify-center rounded-full bg-muted/50 text-foreground transition-colors hover:bg-muted"
         >
           <ArrowLeftIcon className="h-5 w-5" />
         </button>

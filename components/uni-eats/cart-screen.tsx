@@ -1,10 +1,17 @@
 'use client'
 
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import Image from 'next/image'
 import { campuses, formatPrice } from '@/lib/data'
 import { useFirebaseRestaurants } from '@/lib/firebase-db'
-import { calculateDeliveryFeeAmount, formatDistanceKm } from '@/lib/location'
+import { resolveStoreCoords } from '@/lib/location'
+import {
+  DASH_SERVICE_FEE_ZAR,
+  fetchRoadDistanceKm,
+  formatZar,
+  getDeliveryFeeByRoadDistance,
+  getSmallOrderFeeInfo,
+} from '@/lib/dash-engine'
 import { useStore } from './store'
 import {
   ArrowLeftIcon,
@@ -14,7 +21,7 @@ import {
   PinIcon,
 } from '@/components/icons'
 
-const SERVICE_FEE = 0.99
+const SERVICE_FEE = DASH_SERVICE_FEE_ZAR
 const FALLBACK_IMAGE = '/food/featured-burger.jpg'
 
 const lineImage = (image?: string | null) =>
@@ -73,11 +80,11 @@ export function CartScreen() {
           type="button"
           onClick={goHome}
           aria-label="Back"
-          className="flex h-10 w-10 items-center justify-center rounded-full bg-card text-foreground shadow-sm ring-1 ring-border"
+          className="flex h-11 w-11 items-center justify-center rounded-full bg-card text-foreground shadow-sm ring-1 ring-border"
         >
           <ArrowLeftIcon className="h-5 w-5" />
         </button>
-        <h1 className="text-xl font-extrabold tracking-tight text-foreground">
+        <h1 className="text-[22px] font-black tracking-tight text-foreground">
           Your carts
         </h1>
       </header>
@@ -199,8 +206,9 @@ function CartDetail({
   onBack: () => void
   onCheckout: () => void
 }) {
-  const { updateQty, getStoreDistanceKm } = useStore()
+  const { updateQty, userLocation } = useStore()
   const { restaurants: liveRestaurants } = useFirebaseRestaurants()
+  const [roadDistanceKm, setRoadDistanceKm] = useState<number | null>(null)
 
   const restaurantId = lines[0].restaurantId
   const restaurant = useMemo(
@@ -208,22 +216,34 @@ function CartDetail({
     [liveRestaurants, restaurantId],
   )
 
-  const storeDistanceKm = useMemo(
-    () => (restaurant ? getStoreDistanceKm(restaurant) : 1.5),
-    [restaurant, getStoreDistanceKm],
-  )
+  useEffect(() => {
+    if (!userLocation?.coords || !restaurant) return
+    const shopCoords = resolveStoreCoords(restaurant)
+    let cancelled = false
+    fetchRoadDistanceKm(shopCoords, userLocation.coords)
+      .then((km) => {
+        if (!cancelled) setRoadDistanceKm(km)
+      })
+      .catch(() => {
+        if (!cancelled) setRoadDistanceKm(null)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [userLocation, restaurant])
 
-  const deliveryFee = useMemo(
-    () =>
-      calculateDeliveryFeeAmount(
-        storeDistanceKm,
-        restaurant?.storeType === 'grocery',
-      ),
-    [storeDistanceKm, restaurant],
-  )
+  const deliveryFee = useMemo(() => {
+    if (roadDistanceKm === null || roadDistanceKm > 10) return 0
+    return getDeliveryFeeByRoadDistance(roadDistanceKm)
+  }, [roadDistanceKm])
 
   const subtotal = lines.reduce((s, l) => s + l.unitPrice * l.quantity, 0)
-  const total = subtotal + deliveryFee + SERVICE_FEE
+  const storeType = restaurant?.storeType === 'grocery' ? 'grocery' : 'food'
+  const smallOrderInfo = useMemo(
+    () => getSmallOrderFeeInfo(subtotal, storeType),
+    [subtotal, storeType],
+  )
+  const total = subtotal + deliveryFee + smallOrderInfo.smallOrderFeeZar + SERVICE_FEE
 
   return (
     <div className="flex min-h-full flex-col">
@@ -232,11 +252,11 @@ function CartDetail({
           type="button"
           onClick={onBack}
           aria-label="Back to carts"
-          className="flex h-10 w-10 items-center justify-center rounded-full bg-card text-foreground shadow-sm ring-1 ring-border"
+          className="flex h-11 w-11 items-center justify-center rounded-full bg-card text-foreground shadow-sm ring-1 ring-border"
         >
           <ArrowLeftIcon className="h-5 w-5" />
         </button>
-        <h1 className="text-xl font-extrabold tracking-tight text-foreground">
+        <h1 className="text-[22px] font-black tracking-tight text-foreground">
           {lines[0].restaurantName}
         </h1>
       </header>
@@ -288,20 +308,20 @@ function CartDetail({
                     type="button"
                     aria-label={`Decrease ${line.name}`}
                     onClick={() => updateQty(line.lineId, -1)}
-                    className="flex h-7 w-7 items-center justify-center rounded-full bg-card text-foreground shadow-sm"
+                    className="flex h-8 w-8 items-center justify-center rounded-full bg-card text-foreground shadow-sm"
                   >
-                    <MinusIcon className="h-3.5 w-3.5" />
+                    <MinusIcon className="h-4 w-4" />
                   </button>
-                  <span className="w-4 text-center text-sm font-bold">
+                  <span className="w-5 text-center text-sm font-bold">
                     {line.quantity}
                   </span>
                   <button
                     type="button"
                     aria-label={`Increase ${line.name}`}
                     onClick={() => updateQty(line.lineId, 1)}
-                    className="flex h-7 w-7 items-center justify-center rounded-full bg-card text-foreground shadow-sm"
+                    className="flex h-8 w-8 items-center justify-center rounded-full bg-card text-foreground shadow-sm"
                   >
-                    <PlusIcon className="h-3.5 w-3.5" />
+                    <PlusIcon className="h-4 w-4" />
                   </button>
                 </div>
               </div>
@@ -311,15 +331,46 @@ function CartDetail({
       </div>
 
       <div className="mt-5 px-5">
+        {smallOrderInfo.isBelowFloor && (
+          <div className="mb-3 rounded-2xl border border-[#e07a2e]/30 bg-[#e07a2e]/8 p-3.5">
+            <div className="flex items-center justify-between text-xs font-bold text-[#111111]">
+              <span>{smallOrderInfo.message}</span>
+              <span className="text-[#e07a2e]">{smallOrderInfo.progressPercent}%</span>
+            </div>
+            <div className="mt-2 h-2 w-full overflow-hidden rounded-full bg-[#E8E8E8]">
+              <div
+                className="h-full rounded-full bg-[#287d46] transition-all"
+                style={{ width: `${smallOrderInfo.progressPercent}%` }}
+              />
+            </div>
+          </div>
+        )}
+
         <div className="rounded-2xl bg-card p-4 shadow-sm ring-1 ring-border">
-          <Row label="Subtotal" value={formatPrice(subtotal)} />
+          <Row label="Subtotal" value={formatZar(subtotal)} />
           <Row
-            label={`Delivery fee (${formatDistanceKm(storeDistanceKm)})`}
-            value={formatPrice(deliveryFee)}
+            label={
+              roadDistanceKm !== null
+                ? `Delivery fee (${roadDistanceKm.toFixed(1)} km road)`
+                : 'Delivery fee (road distance)'
+            }
+            value={
+              roadDistanceKm === null
+                ? '...'
+                : roadDistanceKm > 10
+                  ? 'Unavailable (>10km)'
+                  : formatZar(deliveryFee)
+            }
           />
-          <Row label="Service fee" value={formatPrice(SERVICE_FEE)} />
+          {smallOrderInfo.smallOrderFeeZar > 0 && (
+            <Row
+              label="Small-order fee"
+              value={formatZar(smallOrderInfo.smallOrderFeeZar)}
+            />
+          )}
+          <Row label="Service fee" value={formatZar(SERVICE_FEE)} />
           <div className="my-3 h-px bg-border" />
-          <Row label="Total" value={formatPrice(total)} strong />
+          <Row label="Total" value={formatZar(total)} strong />
         </div>
       </div>
 
@@ -330,7 +381,7 @@ function CartDetail({
           className="flex w-full items-center justify-between rounded-full bg-primary px-6 py-4 text-sm font-bold text-primary-foreground"
         >
           <span>Go to checkout</span>
-          <span>{formatPrice(total)}</span>
+          <span>{formatZar(total)}</span>
         </button>
       </div>
     </div>

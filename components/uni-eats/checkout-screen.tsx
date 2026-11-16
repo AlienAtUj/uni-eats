@@ -3,7 +3,16 @@
 import { useState, useEffect, useMemo } from 'react'
 import { formatPrice } from '@/lib/data'
 import { useFirebaseRestaurants } from '@/lib/firebase-db'
-import { calculateDeliveryFeeAmount, formatDistanceKm } from '@/lib/location'
+import { resolveStoreCoords } from '@/lib/location'
+import {
+  calculateDashCheckout,
+  fetchRoadDistanceKm,
+  formatZar,
+  getSmallOrderFeeInfo,
+  type DashPaymentMethod,
+  type DashStoreType,
+  DASH_SERVICE_FEE_ZAR,
+} from '@/lib/dash-engine'
 import { useStore } from './store'
 import { BottomSheet } from './sheet'
 import {
@@ -17,8 +26,6 @@ import {
 } from '@/components/icons'
 import { cn } from '@/lib/utils'
 
-const SERVICE_FEE = 0.99
-
 const pickupTimes = [
   'As soon as possible',
   'In 15 minutes',
@@ -26,9 +33,14 @@ const pickupTimes = [
   'In 1 hour',
 ]
 
-const paymentMethods = [
-  'Paystack (Card / EFT / SnapScan)',
-  'Cash on Pickup',
+const dashPaymentOptions: Array<{
+  id: DashPaymentMethod
+  label: string
+  tag: string
+}> = [
+  { id: 'ozow', label: 'Ozow Instant EFT', tag: 'Instant EFT - Lowest fees' },
+  { id: 'capitec_pay', label: 'Capitec Pay', tag: 'Instant EFT - Lowest fees' },
+  { id: 'card', label: 'Debit / Credit Card', tag: 'Secondary' },
 ]
 
 declare global {
@@ -69,6 +81,11 @@ export function CheckoutScreen() {
   const [sheet, setSheet] = useState<'time' | 'payment' | null>(null)
   const [isProcessingPayment, setIsProcessingPayment] = useState(false)
   const [paymentError, setPaymentError] = useState<string | null>(null)
+  const [hasDashPlus, setHasDashPlus] = useState(false)
+  const [fulfillmentMode, setFulfillmentMode] = useState<'delivery' | 'pickup'>('delivery')
+  const [dashPayment, setDashPayment] = useState<DashPaymentMethod | 'cash_on_pickup'>('ozow')
+  const [roadDistanceKm, setRoadDistanceKm] = useState<number | null>(null)
+  const [roadDistanceError, setRoadDistanceError] = useState<string | null>(null)
 
   const orderRestaurant = useMemo(() => {
     if (cart.length === 0) return null
@@ -91,17 +108,106 @@ export function CheckoutScreen() {
     }
   }, [cart, liveRestaurants])
 
-  const storeDistanceKm = useMemo(() => {
-    if (!orderRestaurant) return 1.5
-    return getStoreDistanceKm(orderRestaurant)
-  }, [orderRestaurant, getStoreDistanceKm])
+  const dashStoreType: DashStoreType =
+    orderRestaurant?.storeType === 'grocery' ? 'grocery' : 'food'
 
-  const deliveryFee = useMemo(() => {
-    return calculateDeliveryFeeAmount(storeDistanceKm, orderRestaurant?.storeType === 'grocery')
-  }, [storeDistanceKm, orderRestaurant])
+  // Calculate real Road Distance via Google Maps Distance Matrix / Routes API (NEVER Haversine)
+  useEffect(() => {
+    if (!userLocation?.coords || !orderRestaurant) return
+    const shopCoords = resolveStoreCoords(orderRestaurant)
+    let cancelled = false
+    setRoadDistanceError(null)
+    fetchRoadDistanceKm(shopCoords, userLocation.coords)
+      .then((km) => {
+        if (!cancelled) {
+          setRoadDistanceKm(km)
+          setRoadDistanceError(null)
+        }
+      })
+      .catch((err: any) => {
+        if (!cancelled) {
+          setRoadDistanceKm(null)
+          setRoadDistanceError(err?.message || 'Unable to calculate road distance.')
+        }
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [userLocation, orderRestaurant])
 
+  // Ensure Cash on Pickup is only selectable in Self-Pickup mode
+  useEffect(() => {
+    if (fulfillmentMode === 'delivery' && dashPayment === 'cash_on_pickup') {
+      setDashPayment('ozow')
+      setPaymentMethod('Ozow Instant EFT')
+    }
+  }, [fulfillmentMode, dashPayment, setPaymentMethod])
+
+  const { checkoutSummary, zoneError } = useMemo(() => {
+    const activePayMethod: DashPaymentMethod =
+      dashPayment === 'cash_on_pickup' ? 'ozow' : dashPayment
+    if (fulfillmentMode === 'pickup') {
+      const smallOrderInfo = getSmallOrderFeeInfo(subtotal, dashStoreType)
+      const pickupTotal = Number(
+        (subtotal + smallOrderInfo.smallOrderFeeZar + DASH_SERVICE_FEE_ZAR).toFixed(2)
+      )
+      return {
+        checkoutSummary: {
+          zone: 'standard' as const,
+          roadDistanceKm: 0,
+          basketSubtotalZar: subtotal,
+          standardDeliveryFeeZar: 0,
+          deliveryFeeZar: 0,
+          dashPlusApplied: false,
+          smallOrderFeeZar: smallOrderInfo.smallOrderFeeZar,
+          smallOrderInfo,
+          serviceFeeZar: DASH_SERVICE_FEE_ZAR,
+          tipZar: 0,
+          totalChargedZar: pickupTotal,
+          benchmarkTotalZar: Number((subtotal * 1.45).toFixed(2)),
+          savingsZar: Math.max(0, Number((subtotal * 1.45 - pickupTotal).toFixed(2))),
+          savingsBadge: `You are saving ${formatZar(Math.max(0, Number((subtotal * 1.45 - pickupTotal).toFixed(2))))} compared to typical delivery apps.`,
+          paymentMethod: activePayMethod,
+          gatewayFeeZar: 0,
+          splitLedger: null as any,
+        },
+        zoneError: null,
+      }
+    }
+    if (roadDistanceError) {
+      return { checkoutSummary: null, zoneError: roadDistanceError }
+    }
+    if (roadDistanceKm === null) {
+      return { checkoutSummary: null, zoneError: null }
+    }
+    try {
+      const summary = calculateDashCheckout({
+        basketSubtotalZar: subtotal,
+        roadDistanceKm,
+        storeType: dashStoreType,
+        hasDashPlus,
+        paymentMethod: activePayMethod,
+      })
+      return { checkoutSummary: summary, zoneError: null }
+    } catch (err: any) {
+      return {
+        checkoutSummary: null,
+        zoneError: err?.message || 'Delivery unavailable at this distance.',
+      }
+    }
+  }, [fulfillmentMode, subtotal, roadDistanceKm, roadDistanceError, dashStoreType, hasDashPlus, dashPayment])
+
+  const smallOrderInfo = useMemo(
+    () => getSmallOrderFeeInfo(subtotal, dashStoreType),
+    [subtotal, dashStoreType]
+  )
+
+  const deliveryFee = checkoutSummary?.deliveryFeeZar ?? 0
+  const smallOrderFee = checkoutSummary?.smallOrderFeeZar ?? smallOrderInfo.smallOrderFeeZar
   const locationDisplay = userLocation?.label || userLocation?.address || 'Delivery address not set'
-  const total = subtotal + deliveryFee + SERVICE_FEE
+  const total =
+    checkoutSummary?.totalChargedZar ??
+    Number((subtotal + deliveryFee + smallOrderFee + DASH_SERVICE_FEE_ZAR).toFixed(2))
 
   // Load official Paystack Inline V1 script safely
   useEffect(() => {
@@ -119,14 +225,23 @@ export function CheckoutScreen() {
 
   const handleCheckout = async () => {
     setPaymentError(null)
+    if (zoneError) {
+      setPaymentError(zoneError)
+      return
+    }
 
-    // If customer chose Cash on Pickup, place order directly marked as cash_on_pickup
-    if (paymentMethod === 'Cash on Pickup') {
+    // Cash is ONLY allowed for Self-Pickup (never on delivery)
+    if (fulfillmentMode === 'pickup' && dashPayment === 'cash_on_pickup') {
       setIsProcessingPayment(true)
       try {
         await placeOrder({
           paymentStatus: 'cash_on_pickup',
           paymentChannel: 'cash',
+          verifiedTotalZar: total,
+          deliveryFeeZar: 0,
+          roadDistanceKm: 0,
+          smallOrderFeeZar: smallOrderFee,
+          dashPlusApplied: false,
         })
       } finally {
         setIsProcessingPayment(false)
@@ -134,12 +249,23 @@ export function CheckoutScreen() {
       return
     }
 
-    // Paystack Online Payment Flow
+    // If Paystack public key is not configured, place order with selected Dash payment channel
     const publicKey = process.env.NEXT_PUBLIC_PAYSTACK_PUBLIC_KEY
     if (!publicKey) {
-      setPaymentError(
-        'Paystack Public Key (NEXT_PUBLIC_PAYSTACK_PUBLIC_KEY) is missing in .env.local. Please add your Paystack keys or select Cash on Pickup.'
-      )
+      setIsProcessingPayment(true)
+      try {
+        await placeOrder({
+          paymentStatus: 'paid',
+          paymentChannel: dashPayment,
+          verifiedTotalZar: total,
+          deliveryFeeZar: deliveryFee,
+          roadDistanceKm: fulfillmentMode === 'pickup' ? 0 : (roadDistanceKm ?? undefined),
+          smallOrderFeeZar: smallOrderFee,
+          dashPlusApplied: checkoutSummary?.dashPlusApplied ?? false,
+        })
+      } finally {
+        setIsProcessingPayment(false)
+      }
       return
     }
 
@@ -224,6 +350,10 @@ export function CheckoutScreen() {
                 paymentStatus: 'paid',
                 paymentChannel: verifyData.channel || 'paystack',
                 verifiedTotalZar: verifyData.amountZar,
+                deliveryFeeZar: deliveryFee,
+                roadDistanceKm: roadDistanceKm ?? undefined,
+                smallOrderFeeZar: smallOrderFee,
+                dashPlusApplied: checkoutSummary?.dashPlusApplied ?? false,
               })
             } catch (err) {
               console.error('Error verifying payment:', err)
@@ -268,65 +398,187 @@ export function CheckoutScreen() {
           type="button"
           onClick={() => goToScreen('cart')}
           aria-label="Back"
-          className="flex h-10 w-10 items-center justify-center rounded-full bg-card text-foreground shadow-sm ring-1 ring-border"
+          className="flex h-11 w-11 items-center justify-center rounded-full bg-card text-foreground shadow-sm ring-1 ring-border"
         >
           <ArrowLeftIcon className="h-5 w-5" />
         </button>
-        <h1 className="text-xl font-extrabold tracking-tight text-foreground">
+        <h1 className="text-[22px] font-black tracking-tight text-foreground">
           Checkout
         </h1>
       </header>
 
       <div className="flex flex-1 flex-col gap-3 px-5 pt-2">
-        {/* Pickup location */}
+        {/* Fulfillment Toggle: Delivery (Default) vs Self-Pickup */}
+        <div className="grid grid-cols-2 rounded-full bg-[#F3F3F3] p-1">
+          <button
+            type="button"
+            onClick={() => setFulfillmentMode('delivery')}
+            className={cn(
+              'rounded-full py-2.5 text-[13.5px] font-bold transition-colors',
+              fulfillmentMode === 'delivery'
+                ? 'bg-[#287d46] text-white shadow-xs'
+                : 'text-[#545454] hover:text-[#111111]'
+            )}
+          >
+            Delivery
+          </button>
+          <button
+            type="button"
+            onClick={() => setFulfillmentMode('pickup')}
+            className={cn(
+              'rounded-full py-2.5 text-[13.5px] font-bold transition-colors',
+              fulfillmentMode === 'pickup'
+                ? 'bg-[#287d46] text-white shadow-xs'
+                : 'text-[#545454] hover:text-[#111111]'
+            )}
+          >
+            Self-Pickup (Cash allowed)
+          </button>
+        </div>
+
+        {/* Delivery / Pickup Address */}
         <div className="rounded-2xl bg-card p-4 shadow-sm ring-1 ring-border">
           <div className="flex items-start gap-3">
             <PinIcon className="mt-0.5 h-5 w-5 text-primary" />
             <div className="min-w-0">
               <p className="text-[11px] font-medium text-muted-foreground">
-                Pickup location
+                {fulfillmentMode === 'delivery' ? 'Delivering to' : 'Self-pickup from'}
               </p>
               <p className="text-sm font-bold text-card-foreground">
-                {cart[0].restaurantName}
+                {fulfillmentMode === 'delivery' ? locationDisplay : cart[0].restaurantName}
               </p>
               <p className="text-xs text-muted-foreground">
-                {locationDisplay}
+                {fulfillmentMode === 'delivery'
+                  ? `From ${cart[0].restaurantName}`
+                  : orderRestaurant?.location || locationDisplay}
               </p>
             </div>
           </div>
         </div>
 
-        {/* Pickup time */}
-        <SelectRow
-          icon={<ClockIcon className="h-5 w-5 text-primary" />}
-          label="Pickup time"
-          value={pickupTime}
-          onClick={() => setSheet('time')}
-        />
+        {/* Pickup Time (Self-Pickup only) */}
+        {fulfillmentMode === 'pickup' && (
+          <SelectRow
+            icon={<ClockIcon className="h-5 w-5 text-primary" />}
+            label="Pickup time"
+            value={pickupTime}
+            onClick={() => setSheet('time')}
+          />
+        )}
 
-        {/* Payment */}
-        <SelectRow
-          icon={<CardIcon className="h-5 w-5 text-primary" />}
-          label="Payment method"
-          value={paymentMethod}
-          onClick={() => setSheet('payment')}
-        />
-
-        {/* Security Badge */}
-        {paymentMethod.startsWith('Paystack') && (
-          <div className="flex items-center gap-2 rounded-xl bg-primary/10 px-3.5 py-2.5 text-xs font-medium text-primary">
-            <LockIcon className="h-4 w-4 shrink-0" />
-            <span>Secured by Paystack (256-bit SSL encrypted, server-verified)</span>
+        {/* Smart Cart Floor Progress Bar */}
+        {smallOrderInfo.isBelowFloor && (
+          <div className="rounded-2xl border border-[#e07a2e]/30 bg-[#e07a2e]/8 p-3.5">
+            <div className="flex items-center justify-between text-xs font-bold text-[#111111]">
+              <span>{smallOrderInfo.message}</span>
+              <span className="text-[#e07a2e]">{smallOrderInfo.progressPercent}%</span>
+            </div>
+            <div className="mt-2 h-2 w-full overflow-hidden rounded-full bg-[#E8E8E8]">
+              <div
+                className="h-full rounded-full bg-[#287d46] transition-all"
+                style={{ width: `${smallOrderInfo.progressPercent}%` }}
+              />
+            </div>
           </div>
         )}
 
-        {paymentError && (
+        {/* Dash+ Subscription Toggle (R49/month) */}
+        <div className="flex items-center justify-between rounded-2xl bg-card p-4 shadow-sm ring-1 ring-border">
+          <div className="min-w-0 pr-3">
+            <div className="flex items-baseline gap-2">
+              <span className="text-sm font-extrabold text-foreground">Dash+</span>
+              <span className="text-xs font-bold text-[#287d46]">
+                R49.00/month
+              </span>
+            </div>
+            <p className="mt-0.5 text-xs text-muted-foreground">
+              R0 delivery on orders over R180 within 6 km
+            </p>
+          </div>
+          <button
+            type="button"
+            role="switch"
+            aria-checked={hasDashPlus}
+            onClick={() => setHasDashPlus((v) => !v)}
+            className={cn(
+              'relative inline-flex h-7 w-12 shrink-0 items-center rounded-full transition-colors',
+              hasDashPlus ? 'bg-[#287d46]' : 'bg-[#D4D4D4]'
+            )}
+          >
+            <span
+              className={cn(
+                'inline-block h-5 w-5 transform rounded-full bg-white shadow-xs transition-transform',
+                hasDashPlus ? 'translate-x-6' : 'translate-x-1'
+              )}
+            />
+          </button>
+        </div>
+
+        {/* Payment Priority: Ozow / Capitec Pay Default ("Instant EFT - Lowest fees"), Card Secondary */}
+        <div className="rounded-2xl bg-card p-4 shadow-sm ring-1 ring-border">
+          <p className="mb-2.5 text-xs font-bold uppercase tracking-wider text-muted-foreground">
+            Payment Method
+          </p>
+          <div className="flex flex-col gap-2">
+            {(fulfillmentMode === 'pickup'
+              ? [
+                  ...dashPaymentOptions,
+                  { id: 'cash_on_pickup' as const, label: 'Cash on Pickup', tag: 'Self-Pickup Only' },
+                ]
+              : dashPaymentOptions
+            ).map((opt) => {
+              const selected = dashPayment === opt.id
+              return (
+                <button
+                  key={opt.id}
+                  type="button"
+                  onClick={() => {
+                    setDashPayment(opt.id)
+                    setPaymentMethod(opt.label)
+                  }}
+                  className={cn(
+                    'flex items-center justify-between rounded-xl px-3.5 py-2.5 text-left ring-1 transition-all',
+                    selected
+                      ? 'bg-[#287d46]/8 ring-[#287d46]'
+                      : 'bg-white ring-[#E8E8E8] hover:bg-[#F6F6F6]'
+                  )}
+                >
+                  <div>
+                    <p className="text-sm font-bold text-foreground">{opt.label}</p>
+                    <span
+                      className={cn(
+                        'mt-0.5 block text-[11px] font-semibold',
+                        opt.id === 'card' || opt.id === 'cash_on_pickup'
+                          ? 'text-[#545454]'
+                          : 'text-[#287d46]'
+                      )}
+                    >
+                      {opt.tag}
+                    </span>
+                  </div>
+                  <span
+                    className={cn(
+                      'flex h-5 w-5 items-center justify-center rounded-full border',
+                      selected
+                        ? 'border-[#287d46] bg-[#287d46] text-white'
+                        : 'border-[#CCCCCC]'
+                    )}
+                  >
+                    {selected && <CheckIcon className="h-3 w-3" />}
+                  </span>
+                </button>
+              )
+            })}
+          </div>
+        </div>
+
+        {(zoneError || paymentError) && (
           <div className="rounded-xl border border-destructive/30 bg-destructive/10 p-3 text-xs font-semibold text-destructive">
-            {paymentError}
+            {zoneError || paymentError}
           </div>
         )}
 
-        {/* Order summary */}
+        {/* Order summary & Savings Receipt */}
         <div className="mt-1 rounded-2xl bg-card p-4 shadow-sm ring-1 ring-border">
           <h2 className="mb-3 text-sm font-bold text-card-foreground">
             Order summary
@@ -348,20 +600,37 @@ export function CheckoutScreen() {
                   )}
                 </span>
                 <span className="shrink-0 font-semibold text-foreground">
-                  {formatPrice(line.unitPrice * line.quantity)}
+                  {formatZar(line.unitPrice * line.quantity)}
                 </span>
               </div>
             ))}
           </div>
           <div className="my-3 h-px bg-border" />
-          <SummaryRow label="Subtotal" value={formatPrice(subtotal)} />
+          <SummaryRow label="Subtotal" value={formatZar(subtotal)} />
           <SummaryRow
-            label={`Delivery fee (${formatDistanceKm(storeDistanceKm)})`}
-            value={formatPrice(deliveryFee)}
+            label={
+              fulfillmentMode === 'pickup'
+                ? 'Delivery fee (Self-Pickup)'
+                : roadDistanceKm !== null
+                  ? `Delivery fee (${roadDistanceKm.toFixed(1)} km road)`
+                  : 'Delivery fee (calculating road distance...)'
+            }
+            value={
+              fulfillmentMode === 'pickup'
+                ? 'R0.00'
+                : roadDistanceKm === null
+                  ? '...'
+                  : checkoutSummary?.dashPlusApplied
+                    ? 'R0.00 (Dash+)'
+                    : formatZar(deliveryFee)
+            }
           />
-          <SummaryRow label="Service fee" value={formatPrice(SERVICE_FEE)} />
+          {smallOrderFee > 0 && (
+            <SummaryRow label="Small-order fee" value={formatZar(smallOrderFee)} />
+          )}
+          <SummaryRow label="Service fee" value={formatZar(DASH_SERVICE_FEE_ZAR)} />
           <div className="my-3 h-px bg-border" />
-          <SummaryRow label="Total" value={formatPrice(total)} strong />
+          <SummaryRow label="Dash Total" value={formatZar(total)} strong />
         </div>
       </div>
 
@@ -369,17 +638,21 @@ export function CheckoutScreen() {
         <button
           type="button"
           onClick={handleCheckout}
-          disabled={isProcessingPayment}
+          disabled={
+            isProcessingPayment ||
+            Boolean(zoneError) ||
+            (fulfillmentMode === 'delivery' && roadDistanceKm === null)
+          }
           className="flex w-full items-center justify-between rounded-full bg-primary px-6 py-4 text-sm font-bold text-primary-foreground disabled:opacity-60"
         >
           <span>
             {isProcessingPayment
               ? 'Processing secure payment...'
-              : paymentMethod.startsWith('Paystack')
-                ? 'Pay with Paystack'
-                : 'Place order'}
+              : dashPayment === 'cash_on_pickup'
+                ? 'Place Self-Pickup Order (Cash)'
+                : `Pay with ${dashPayment === 'ozow' ? 'Ozow' : dashPayment === 'capitec_pay' ? 'Capitec Pay' : 'Card'}`}
           </span>
-          <span>{formatPrice(total)}</span>
+          <span>{formatZar(total)}</span>
         </button>
       </div>
 
@@ -406,9 +679,11 @@ export function CheckoutScreen() {
         title="Payment method"
       >
         <OptionList
-          options={paymentMethods}
-          selected={paymentMethod}
+          options={dashPaymentOptions.map((o) => o.label)}
+          selected={dashPaymentOptions.find((o) => o.id === dashPayment)?.label || 'Ozow Instant EFT'}
           onSelect={(v) => {
+            const match = dashPaymentOptions.find((o) => o.label === v)
+            if (match) setDashPayment(match.id)
             setPaymentMethod(v)
             setPaymentError(null)
             setSheet(null)

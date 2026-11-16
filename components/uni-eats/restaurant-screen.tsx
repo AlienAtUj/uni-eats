@@ -90,7 +90,7 @@ export function RestaurantScreen() {
           type="button"
           onClick={goHome}
           aria-label="Back"
-          className="absolute left-4 top-4 flex h-10 w-10 items-center justify-center rounded-full bg-white text-foreground shadow-md"
+          className="absolute left-4 top-4 flex h-11 w-11 items-center justify-center rounded-full bg-white text-foreground shadow-md"
         >
           <ArrowLeftIcon className="h-5 w-5" />
         </button>

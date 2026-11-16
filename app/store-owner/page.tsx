@@ -22,6 +22,8 @@ import {
   LogOutIcon,
 } from '@/components/icons'
 import { BottomSheet } from '@/components/uni-eats/sheet'
+import { MerchantFinanceDashboard } from '@/components/uni-eats/merchant-finance-dashboard'
+import { validateInStorePrice } from '@/lib/dash-engine'
 import { formatPrice, isGroceryCategory, type StoreType } from '@/lib/data'
 import { DEPARTMENTS } from '@/lib/grocery-catalog'
 import { MEAL_CATEGORIES } from '@/lib/meal-catalog'
@@ -44,6 +46,9 @@ import {
   deleteProduct,
   subscribeToMerchantOrders,
   updateOrderStatus,
+  updateMerchantCompliance,
+  verifyOrderPickupPin,
+  useFirebaseRestaurants,
   type Order,
   type OrderStatus,
 } from '@/lib/firebase-db'
@@ -68,11 +73,11 @@ const statusStyles: Record<OrderStatus, { pill: string; label: string }> = {
   },
   ready: {
     pill: 'bg-primary text-primary-foreground',
-    label: 'Ready',
+    label: 'Ready for Rider',
   },
   completed: {
     pill: 'bg-secondary text-muted-foreground',
-    label: 'Collected',
+    label: 'Delivered',
   },
   cancelled: {
     pill: 'bg-destructive/10 text-destructive',
@@ -92,8 +97,8 @@ const orderFilters: { key: OrderFilter; label: string }[] = [
   { key: 'all', label: 'All' },
   { key: 'pending', label: 'New' },
   { key: 'preparing', label: 'Preparing' },
-  { key: 'ready', label: 'Ready' },
-  { key: 'completed', label: 'Collected' },
+  { key: 'ready', label: 'Ready for Rider' },
+  { key: 'completed', label: 'Delivered' },
 ]
 
 export default function StoreOwnerDashboard() {
@@ -128,6 +133,11 @@ export default function StoreOwnerDashboard() {
   const [isLoadingOrders, setIsLoadingOrders] = useState(false)
 
   const { products: fbProducts, mutate } = useFirebaseProducts(merchantId)
+  const { restaurants: allRestaurants, mutate: mutateRestaurants } = useFirebaseRestaurants()
+  const currentMerchantRecord = useMemo(
+    () => allRestaurants.find((r) => r.id === merchantId),
+    [allRestaurants, merchantId]
+  )
   const allProducts = useMemo(
     () =>
       merchantId
@@ -323,6 +333,21 @@ export default function StoreOwnerDashboard() {
     }
 
     try {
+      // Enforce In-Store Price Promise on every product upload/edit
+      const submittedPrice = Number(newProductData.price)
+      const physicalInStorePrice = Number(
+        newProductData.inStorePrice ??
+          newProductData.oldPrice ??
+          editingProduct?.price ??
+          submittedPrice
+      )
+      validateInStorePrice(submittedPrice, physicalInStorePrice)
+
+      if (currentMerchantRecord && currentMerchantRecord.inStorePricePromiseAccepted === false) {
+        alert('You must accept the In-Store Menu Price Promise before uploading products.')
+        return
+      }
+
       if (newProductData.storeType && newProductData.storeType !== storeType) {
         setStoreType(newProductData.storeType)
         setNewStoreType(newProductData.storeType)
@@ -403,6 +428,15 @@ export default function StoreOwnerDashboard() {
     if (isNaN(parsed) || parsed <= 0) {
       alert('Please enter a valid price greater than zero.')
       return
+    }
+    const existingProduct = allProducts.find((p) => p.id === productId)
+    if (existingProduct) {
+      try {
+        validateInStorePrice(parsed, existingProduct.oldPrice ?? existingProduct.price)
+      } catch (err: any) {
+        alert(err?.message || 'In-Store Price Promise violation: cannot inflate price.')
+        return
+      }
     }
     setIsUpdatingPrice(true)
     try {
@@ -602,6 +636,57 @@ export default function StoreOwnerDashboard() {
               {/* TAB 1: ORDERS */}
               {activeTab === 'orders' && (
                 <div>
+                  <div className="px-5 pt-4">
+                    <MerchantFinanceDashboard
+                      merchantName={merchantName}
+                      storeType={storeType === 'grocery' ? 'grocery' : 'food'}
+                      initialPricePromiseAccepted={Boolean(
+                        currentMerchantRecord?.inStorePricePromiseAccepted
+                      )}
+                      initialSponsoredTop3={Boolean(
+                        currentMerchantRecord?.sponsoredTop3Active
+                      )}
+                      onTogglePricePromise={async (accepted) => {
+                        if (!merchantId) return
+                        await updateMerchantCompliance(merchantId, {
+                          inStorePricePromiseAccepted: accepted,
+                        })
+                        mutateRestaurants()
+                      }}
+                      onToggleSponsoredTop3={async (active) => {
+                        if (!merchantId) return
+                        await updateMerchantCompliance(merchantId, {
+                          sponsoredTop3Active: active,
+                        })
+                        mutateRestaurants()
+                      }}
+                      onVerifyPickup={async (orderDocId, pin) => {
+                        await verifyOrderPickupPin(orderDocId, pin)
+                      }}
+                      orders={orders.map((o) => {
+                        const createdMs =
+                          o.createdAt?.toMillis?.() ||
+                          (typeof o.createdAt === 'number' ? o.createdAt : Date.now())
+                        return {
+                          id: o.id,
+                          orderCode: o.orderId || o.id.slice(0, 8),
+                          grossOrderValueZar: Number(o.total || 0),
+                          deliveryFeeZar: Number(o.deliveryFeeZar ?? 0),
+                          storeType: storeType === 'grocery' ? 'grocery' : 'food',
+                          paymentMethod:
+                            o.paymentChannel === 'capitec_pay'
+                              ? 'capitec_pay'
+                              : o.paymentChannel === 'card'
+                                ? 'card'
+                                : 'ozow',
+                          pickupPin: o.pickupPin || '',
+                          batchDispatch: Boolean(o.batchDispatch),
+                          prepStartedAtMs: createdMs,
+                          pickupVerified: Boolean(o.pickupVerified) || o.status === 'completed',
+                        }
+                      })}
+                    />
+                  </div>
                   {/* Priority New Orders Banner when new orders are waiting */}
                   {pendingOrdersCount > 0 && (
                     <div className="mx-5 mt-4 flex items-center justify-between gap-3 rounded-2xl bg-accent/15 px-4 py-3 ring-1 ring-accent/40">
@@ -864,7 +949,7 @@ export default function StoreOwnerDashboard() {
                                   className="inline-flex items-center gap-1.5 rounded-full bg-primary px-5 py-2.5 text-xs font-bold text-primary-foreground shadow-sm transition-transform active:scale-95"
                                 >
                                   <CheckIcon className="h-3.5 w-3.5" />
-                                  <span>Mark Collected</span>
+                                  <span>Mark Delivered</span>
                                 </button>
                               )}
                               {order.status === 'completed' && (

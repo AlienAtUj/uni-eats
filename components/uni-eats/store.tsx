@@ -20,6 +20,7 @@ import {
   calculateDeliveryFee,
   calculateDeliveryTime,
 } from '@/lib/location'
+import { generateDeliveryOtp, DASH_SERVICE_FEE_ZAR, getDeliveryFeeByRoadDistance, formatZar } from '@/lib/dash-engine'
 import { onAuthStateChanged, signOut as firebaseSignOut, type User } from 'firebase/auth'
 import { auth } from '@/lib/firebase'
 import { fetchUserRole, type UserRole } from '@/lib/firebase-auth'
@@ -31,7 +32,7 @@ import {
   type Order,
 } from '@/lib/firebase-db'
 
-const SERVICE_FEE = 0.99
+const SERVICE_FEE = DASH_SERVICE_FEE_ZAR
 const FALLBACK_IMAGE = '/food/featured-burger.jpg'
 
 export type Screen =
@@ -104,6 +105,10 @@ type Store = {
     paymentStatus?: 'paid' | 'pending' | 'cash_on_pickup'
     paymentChannel?: string
     verifiedTotalZar?: number
+    deliveryFeeZar?: number
+    roadDistanceKm?: number
+    smallOrderFeeZar?: number
+    dashPlusApplied?: boolean
   }) => Promise<void>
   // Auth state
   user: User | null
@@ -124,6 +129,7 @@ export type PlacedOrder = {
   status?: string
   paymentReference?: string
   paymentStatus?: 'paid' | 'pending' | 'cash_on_pickup'
+  deliveryOtp?: string
 }
 
 type Carts = Record<string, CartLine[]>
@@ -498,7 +504,9 @@ export function StoreProvider({ children }: { children: ReactNode }) {
 
   const getStoreDeliveryFee = (store: Restaurant): string => {
     const dist = getStoreDistanceKm(store)
-    return calculateDeliveryFee(dist, store.storeType === 'grocery')
+    if (!Number.isFinite(dist)) return formatZar(16)
+    if (dist > 10) return 'Unavailable (>10km)'
+    return formatZar(getDeliveryFeeByRoadDistance(dist))
   }
 
   const getStoreDeliveryTime = (store: Restaurant): string => {
@@ -672,6 +680,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       const merchantName = orderLines[0].restaurantName
 
       let firestoreDocId: string | undefined = undefined
+      const deliveryOtp = generateDeliveryOtp()
+      const pickupPin = generateDeliveryOtp()
 
       try {
         firestoreDocId = await createOrder({
@@ -693,6 +703,15 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           paymentReference: paymentMeta?.paymentReference || '',
           paymentStatus: paymentMeta?.paymentStatus || 'cash_on_pickup',
           paymentChannel: paymentMeta?.paymentChannel || paymentMethod,
+          deliveryOtp,
+          pickupPin,
+          deliveryFeeZar: paymentMeta?.deliveryFeeZar,
+          roadDistanceKm: paymentMeta?.roadDistanceKm,
+          smallOrderFeeZar: paymentMeta?.smallOrderFeeZar,
+          serviceFeeZar: DASH_SERVICE_FEE_ZAR,
+          dashPlusApplied: paymentMeta?.dashPlusApplied ?? false,
+          batchDispatch: false,
+          pickupVerified: false,
         })
       } catch (err: any) {
         if (err?.code !== 'permission-denied') {
@@ -711,6 +730,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         status: 'pending',
         paymentReference: paymentMeta?.paymentReference,
         paymentStatus: paymentMeta?.paymentStatus || 'cash_on_pickup',
+        deliveryOtp,
       })
 
       // Remove only the cart that was ordered; other store carts stay

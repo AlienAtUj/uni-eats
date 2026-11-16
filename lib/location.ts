@@ -20,8 +20,8 @@ export type DeliveryLocation = {
   accuracy?: number
 }
 
-/** Standard automatic delivery zone radius cutoff in km (like Sixty60 / Uber Eats / Mr D). Stores beyond this distance are never shown. */
-export const SERVICE_DELIVERY_RADIUS_KM = 15
+/** Standard automatic delivery zone radius cutoff in km (0-8km standard, 8-10km extended, >10km locked). */
+export const SERVICE_DELIVERY_RADIUS_KM = 10
 
 const storeGeocodeCache = new Map<string, Coordinates>()
 const searchQueryCache = new Map<string, DeliveryLocation[]>()

@@ -344,10 +344,10 @@ export function HomeScreen() {
               />
             </span>
             <div>
-              <p className="text-[11px] font-semibold uppercase tracking-wider text-[#545454]">
+              <p className="text-xs font-semibold uppercase tracking-wider text-[#545454]">
                 Stores and Eats ASAP
               </p>
-              <p className="text-[20px] font-black leading-tight tracking-tight text-[#111111]">
+              <p className="text-[22px] font-black leading-tight tracking-tight text-[#111111]">
                 Dash
               </p>
             </div>
@@ -356,7 +356,7 @@ export function HomeScreen() {
           <button
             type="button"
             onClick={() => goToScreen('profile')}
-            className="flex h-10 w-10 items-center justify-center rounded-full bg-[#F3F3F3] text-sm font-bold text-[#111111] transition-colors hover:bg-[#E8E8E8]"
+            className="flex h-11 w-11 items-center justify-center rounded-full bg-[#F3F3F3] text-[15px] font-bold text-[#111111] transition-colors hover:bg-[#E8E8E8]"
             aria-label="Open account"
           >
             {userInitials}
@@ -367,18 +367,18 @@ export function HomeScreen() {
         <button
           type="button"
           onClick={() => setLocationSheetOpen(true)}
-          className="mt-3.5 flex w-full items-center justify-between rounded-full bg-[#F3F3F3] px-3.5 py-2.5 text-left transition-colors hover:bg-[#EAEAEA] active:scale-[0.99]"
+          className="mt-3.5 flex w-full items-center justify-between rounded-full bg-[#F3F3F3] px-4 py-3 text-left transition-colors hover:bg-[#EAEAEA] active:scale-[0.99]"
         >
-          <span className="flex min-w-0 items-center gap-2.5">
-            <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-[#287d46] text-white">
+          <span className="flex min-w-0 items-center gap-3">
+            <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-[#287d46] text-white">
               {isLocatingGps && !userLocation ? (
                 <span className="inline-block h-4 w-4 animate-spin rounded-full border-2 border-white border-t-transparent" />
               ) : (
-                <PinIcon className="h-4 w-4" />
+                <PinIcon className="h-5 w-5" />
               )}
             </span>
               <div className="flex min-w-0 flex-col">
-                <span className="flex items-center gap-1.5 truncate text-[13.5px] font-bold text-[#111111]">
+                <span className="flex items-center gap-1.5 truncate text-[15px] font-bold text-[#111111]">
                   <span>
                     {isLocatingGps && !userLocation
                       ? 'Detecting your location...'
@@ -387,30 +387,30 @@ export function HomeScreen() {
                         : 'Set your delivery address'}
                   </span>
                   {userLocation?.isApproximate && (
-                    <span className="rounded-full bg-[#287d46]/12 px-2 py-0.5 text-[10px] font-bold text-[#287d46]">
+                    <span className="rounded-full bg-[#287d46]/12 px-2 py-0.5 text-[11px] font-bold text-[#287d46]">
                       Approximate
                     </span>
                   )}
                 </span>
-                <span className="truncate text-[11px] font-medium text-[#545454]">
+                <span className="truncate text-xs font-medium text-[#545454]">
                   {userLocation
                     ? userLocation.address || 'Delivering to your location'
                     : 'Required to see stores & products near you'}
                 </span>
               </div>
           </span>
-          <ChevronDownIcon className="ml-2 h-4 w-4 shrink-0 text-[#111111]" />
+          <ChevronDownIcon className="ml-2 h-5 w-5 shrink-0 text-[#111111]" />
         </button>
 
         {/* Uber Eats-Style Search Bar (only active when location is set) */}
         {userLocation && (
-          <div className="mt-2.5 flex items-center gap-3 rounded-full bg-[#F3F3F3] px-4 py-3">
+          <div className="mt-3 flex items-center gap-3 rounded-full bg-[#F3F3F3] px-4 py-3.5">
             <SearchIcon className="h-5 w-5 shrink-0 text-[#111111]" />
             <input
               value={query}
               onChange={(e) => setQuery(e.target.value)}
               placeholder="Search restaurants, dishes, or stores..."
-              className="w-full bg-transparent text-sm text-foreground outline-none placeholder:text-muted-foreground"
+              className="w-full bg-transparent text-[15px] font-medium text-foreground outline-none placeholder:text-[#545454]"
             />
             {query && (
               <button
@@ -591,13 +591,13 @@ export function HomeScreen() {
               type="button"
               onClick={() => setHomeMode('eat')}
               className={cn(
-                'flex items-center justify-center gap-2 rounded-full py-2.5 text-sm transition-all',
+                'flex items-center justify-center gap-2 rounded-full py-3 text-[15px] transition-all',
                 homeMode === 'eat'
                   ? 'bg-[#287d46] font-bold text-white shadow-xs'
                   : 'font-semibold text-[#545454] hover:text-[#111111]'
               )}
             >
-              <StoreIcon className="h-4 w-4" />
+              <StoreIcon className="h-5 w-5" />
               <span>Eat (Meals)</span>
             </button>
 
@@ -605,13 +605,13 @@ export function HomeScreen() {
               type="button"
               onClick={() => setHomeMode('shop')}
               className={cn(
-                'flex items-center justify-center gap-2 rounded-full py-2.5 text-sm transition-all',
+                'flex items-center justify-center gap-2 rounded-full py-3 text-[15px] transition-all',
                 homeMode === 'shop'
                   ? 'bg-[#287d46] font-bold text-white shadow-xs'
                   : 'font-semibold text-[#545454] hover:text-[#111111]'
               )}
             >
-              <BagIcon className="h-4 w-4" />
+              <BagIcon className="h-5 w-5" />
               <span>Shop (Stores)</span>
             </button>
           </div>
@@ -727,27 +727,27 @@ export function HomeScreen() {
                     {/* Quick meal categories */}
                     <section className="mt-5">
                       <SectionHeader title="Browse meal categories" />
-                      <div className="no-scrollbar flex snap-x gap-3 overflow-x-auto px-5 pb-1">
+                      <div className="no-scrollbar flex snap-x gap-3.5 overflow-x-auto px-5 pb-1">
                         {MEAL_CATEGORIES.map((cat) => (
                           <button
                             key={cat.id}
                             type="button"
                             onClick={() => openDepartment(cat.id)}
-                            className="group flex w-[21.5%] shrink-0 snap-start flex-col items-center text-center"
+                            className="group flex w-24 shrink-0 snap-start flex-col items-center text-center"
                           >
                             <div
-                              className="relative flex aspect-square w-full items-center justify-center overflow-hidden rounded-2xl shadow-2xs transition-all group-hover:shadow-md group-active:scale-95"
+                              className="relative flex h-24 w-24 items-center justify-center overflow-hidden rounded-2xl shadow-sm ring-1 ring-[#E8E8E8] transition-all group-hover:shadow-md group-active:scale-95"
                               style={{ backgroundColor: cat.bg }}
                             >
                               <Image
                                 src={cat.icon}
                                 alt={cat.title}
                                 fill
-                                sizes="96px"
-                                className="object-cover"
+                                sizes="112px"
+                                className="object-cover transition-transform duration-200 group-hover:scale-105"
                               />
                             </div>
-                            <span className="mt-2 text-xs font-bold leading-tight text-foreground">
+                            <span className="mt-2 text-[13px] font-bold leading-tight text-[#111111]">
                               {cat.line1}
                               {cat.line2 && (
                                 <>
@@ -816,9 +816,16 @@ export function HomeScreen() {
                                 className="flex w-full items-start justify-between gap-2 text-left"
                               >
                                 <div className="min-w-0 flex-1">
-                                  <h3 className="truncate text-[16px] font-bold text-[#111111]">
-                                    {r.name}
-                                  </h3>
+                                  <div className="flex items-center gap-2">
+                                    <h3 className="truncate text-[16px] font-bold text-[#111111]">
+                                      {r.name}
+                                    </h3>
+                                    {r.sponsoredTop3Active && (
+                                      <span className="shrink-0 rounded-full bg-[#e07a2e]/15 px-2 py-0.5 text-[10px] font-extrabold text-[#e07a2e]">
+                                        Promoted
+                                      </span>
+                                    )}
+                                  </div>
                                   <p className="mt-0.5 truncate text-[12.5px] font-medium text-[#545454]">
                                     {r.distance} • {r.deliveryFee} • {r.pickupTime}
                                   </p>
@@ -828,11 +835,11 @@ export function HomeScreen() {
                                 </span>
                               </button>
 
-                              <div className="mt-3 flex items-center gap-2">
+                              <div className="mt-3 flex items-center gap-2.5">
                                 <button
                                   type="button"
                                   onClick={() => openRestaurant(r.id)}
-                                  className="rounded-full bg-[#287d46] px-4 py-1.5 text-xs font-bold text-white transition-colors hover:bg-[#216639] active:scale-95"
+                                  className="rounded-full bg-[#287d46] px-4.5 py-2.5 text-[13px] font-bold text-white transition-colors hover:bg-[#216639] active:scale-95"
                                 >
                                   View Menu
                                 </button>
@@ -840,7 +847,7 @@ export function HomeScreen() {
                                   <button
                                     type="button"
                                     onClick={() => handleQuickAddFromStore(r)}
-                                    className="rounded-full bg-[#f3f3f3] px-4 py-1.5 text-xs font-bold text-[#111111] transition-colors hover:bg-[#e5e5e5] active:scale-95"
+                                    className="rounded-full bg-[#f3f3f3] px-4.5 py-2.5 text-[13px] font-bold text-[#111111] transition-colors hover:bg-[#e5e5e5] active:scale-95"
                                   >
                                     {addedItemId === r.id ? 'Added' : '+ Quick Add'}
                                   </button>
@@ -944,27 +951,27 @@ export function HomeScreen() {
                     {/* Quick quick categories */}
                     <section className="mt-5">
                       <SectionHeader title="Quick quick categories" />
-                      <div className="no-scrollbar flex snap-x gap-3 overflow-x-auto px-5 pb-1">
+                      <div className="no-scrollbar flex snap-x gap-3.5 overflow-x-auto px-5 pb-1">
                         {DEPARTMENTS.map((cat) => (
                           <button
                             key={cat.id}
                             type="button"
                             onClick={() => openDepartment(cat.id)}
-                            className="group flex w-[21.5%] shrink-0 snap-start flex-col items-center text-center"
+                            className="group flex w-24 shrink-0 snap-start flex-col items-center text-center"
                           >
                             <div
-                              className="relative flex aspect-square w-full items-center justify-center overflow-hidden rounded-2xl shadow-2xs transition-all group-hover:shadow-md group-active:scale-95"
+                              className="relative flex h-24 w-24 items-center justify-center overflow-hidden rounded-2xl shadow-sm ring-1 ring-[#E8E8E8] transition-all group-hover:shadow-md group-active:scale-95"
                               style={{ backgroundColor: cat.bg }}
                             >
                               <Image
                                 src={cat.icon}
                                 alt={cat.title}
                                 fill
-                                sizes="96px"
-                                className="object-cover"
+                                sizes="112px"
+                                className="object-cover transition-transform duration-200 group-hover:scale-105"
                               />
                             </div>
-                            <span className="mt-2 text-xs font-bold leading-tight text-foreground">
+                            <span className="mt-2 text-[13px] font-bold leading-tight text-[#111111]">
                               {cat.line1}
                               {cat.line2 && (
                                 <>
@@ -1034,9 +1041,16 @@ export function HomeScreen() {
                                   className="flex w-full items-start justify-between gap-2 text-left"
                                 >
                                   <div className="min-w-0 flex-1">
-                                    <h3 className="truncate text-[16px] font-bold text-[#111111]">
-                                      {store.name}
-                                    </h3>
+                                    <div className="flex items-center gap-2">
+                                      <h3 className="truncate text-[16px] font-bold text-[#111111]">
+                                        {store.name}
+                                      </h3>
+                                      {store.sponsoredTop3Active && (
+                                        <span className="shrink-0 rounded-full bg-[#e07a2e]/15 px-2 py-0.5 text-[10px] font-extrabold text-[#e07a2e]">
+                                          Promoted
+                                        </span>
+                                      )}
+                                    </div>
                                     <p className="mt-0.5 truncate text-[12.5px] font-medium text-[#545454]">
                                       {store.distance} • {store.deliveryFee} • {store.pickupTime}
                                     </p>
@@ -1046,11 +1060,11 @@ export function HomeScreen() {
                                   </span>
                                 </button>
 
-                                <div className="mt-3 flex items-center gap-2">
+                                <div className="mt-3 flex items-center gap-2.5">
                                   <button
                                     type="button"
                                     onClick={() => openRestaurant(store.id)}
-                                    className="rounded-full bg-[#287d46] px-4 py-1.5 text-xs font-bold text-white transition-colors hover:bg-[#216639] active:scale-95"
+                                    className="rounded-full bg-[#287d46] px-4.5 py-2.5 text-[13px] font-bold text-white transition-colors hover:bg-[#216639] active:scale-95"
                                   >
                                     View Shop
                                   </button>
@@ -1058,7 +1072,7 @@ export function HomeScreen() {
                                     type="button"
                                     onClick={() => handleQuickAddFromStore(store)}
                                     className={cn(
-                                      'rounded-full px-4 py-1.5 text-xs font-bold transition-colors active:scale-95',
+                                      'rounded-full px-4.5 py-2.5 text-[13px] font-bold transition-colors active:scale-95',
                                       addedItemId === store.id
                                         ? 'bg-[#216639] text-white'
                                         : 'bg-[#f3f3f3] text-[#111111] hover:bg-[#e5e5e5]'
@@ -1293,8 +1307,8 @@ export function HomeScreen() {
 
 function SectionHeader({ title }: { title: string }) {
   return (
-    <div className="mb-3 flex items-center justify-between px-5">
-      <h2 className="text-[19px] font-extrabold tracking-tight text-foreground">
+    <div className="mb-3.5 flex items-center justify-between px-5">
+      <h2 className="text-[22px] font-black tracking-tight text-[#111111]">
         {title}
       </h2>
     </div>
@@ -1329,7 +1343,7 @@ function ProductRail({
         >
           {icon && icon.trim() && (
             <span
-              className="relative h-8 w-8 overflow-hidden rounded-lg"
+              className="relative h-10 w-10 overflow-hidden rounded-xl ring-1 ring-[#E8E8E8]"
               style={{ backgroundColor: iconBg }}
             >
               <Image
@@ -1397,7 +1411,7 @@ function MealRail({
         >
           {icon && icon.trim() && (
             <span
-              className="relative h-8 w-8 overflow-hidden rounded-lg"
+              className="relative h-10 w-10 overflow-hidden rounded-xl ring-1 ring-[#E8E8E8]"
               style={{ backgroundColor: iconBg }}
             >
               <Image

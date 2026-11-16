@@ -97,8 +97,8 @@ export function QtyControl({
   onDec: () => void
   size?: 'md' | 'lg'
 }) {
-  const btn = size === 'lg' ? 'h-11 w-11' : 'h-8 w-8'
-  const icon = size === 'lg' ? 'h-5 w-5' : 'h-4 w-4'
+  const btn = size === 'lg' ? 'h-12 w-12' : 'h-9 w-9'
+  const icon = size === 'lg' ? 'h-5 w-5' : 'h-[18px] w-[18px]'
 
   if (qty === 0) {
     return (
@@ -204,27 +204,27 @@ export function ProductCard({
         </div>
       </div>
 
-      <div className="flex flex-1 flex-col pt-2">
-        <p className="line-clamp-2 text-[14px] font-bold leading-snug text-[#111111]">
+      <div className="flex flex-1 flex-col pt-2.5">
+        <p className="line-clamp-2 text-[15px] font-bold leading-snug text-[#111111]">
           {item.name}
         </p>
-        <div className="mt-0.5 flex items-baseline gap-1.5">
+        <div className="mt-1 flex items-baseline gap-1.5">
           <span
             className={cn(
-              'text-[13px] font-semibold tracking-tight',
+              'text-[14.5px] font-bold tracking-tight',
               onSpecial ? 'text-[#e23b2e]' : 'text-[#111111]'
             )}
           >
             {formatPrice(item.price)}
           </span>
           {onSpecial && (
-            <span className="text-[11px] font-medium text-[#757575] line-through">
+            <span className="text-xs font-medium text-[#757575] line-through">
               {formatPrice(item.oldPrice as number)}
             </span>
           )}
         </div>
         {metaText && (
-          <p className="mt-0.5 truncate text-[11.5px] font-medium text-[#545454]">
+          <p className="mt-0.5 truncate text-xs font-medium text-[#545454]">
             {metaText}
           </p>
         )}

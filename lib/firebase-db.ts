@@ -76,6 +76,15 @@ export interface Order {
   paymentReference?: string
   paymentStatus?: 'paid' | 'pending' | 'cash_on_pickup'
   paymentChannel?: string
+  deliveryOtp?: string
+  pickupPin?: string
+  deliveryFeeZar?: number
+  roadDistanceKm?: number
+  smallOrderFeeZar?: number
+  serviceFeeZar?: number
+  dashPlusApplied?: boolean
+  batchDispatch?: boolean
+  pickupVerified?: boolean
   createdAt: any
   updatedAt: any
   pickupTime?: string
@@ -676,6 +685,45 @@ export async function createOrder(orderData: Omit<Order, 'id' | 'createdAt' | 'u
   }
 }
 
+/** Persist Merchant In-Store Price Promise & Top-3 Sponsored Placement to Firestore */
+export async function updateMerchantCompliance(
+  merchantId: string,
+  updates: {
+    inStorePricePromiseAccepted?: boolean
+    sponsoredTop3Active?: boolean
+  }
+) {
+  if (!merchantId) throw new Error('merchantId is required')
+  const restaurantRef = doc(db, 'restaurants', merchantId)
+  await setDoc(
+    restaurantRef,
+    {
+      ...updates,
+      ...(updates.inStorePricePromiseAccepted ? { inStorePricePromiseAcceptedAt: serverTimestamp() } : {}),
+      ...(updates.sponsoredTop3Active ? { sponsoredTop3ActivatedAt: serverTimestamp() } : {}),
+      updatedAt: serverTimestamp(),
+    },
+    { merge: true }
+  )
+}
+
+/** Verify Rider Pickup PIN against the real order in Firestore */
+export async function verifyOrderPickupPin(orderDocId: string, enteredPin: string) {
+  const orderRef = doc(db, 'orders', orderDocId)
+  const snap = await getDoc(orderRef)
+  if (!snap.exists()) {
+    throw new Error('Order not found.')
+  }
+  const data = snap.data() as Partial<Order>
+  if (!data.pickupPin || data.pickupPin !== enteredPin.trim()) {
+    throw new Error('Invalid Order PIN. Ask the rider for the 4-digit pickup PIN.')
+  }
+  await updateDoc(orderRef, {
+    pickupVerified: true,
+    updatedAt: serverTimestamp(),
+  })
+}
+
 /** Get orders for a merchant (with latest first) */
 export async function getMerchantOrders(merchantId: string): Promise<Order[]> {
   try {
@@ -758,6 +806,24 @@ export async function updateOrderStatus(orderId: string, status: OrderStatus) {
     console.error('Error updating order status:', error)
     throw error
   }
+}
+
+/** Cancel a customer order ONLY while it is not ready (pending or preparing) */
+export async function cancelCustomerOrder(orderId: string) {
+  const orderRef = doc(db, 'orders', orderId)
+  const snap = await getDoc(orderRef)
+  if (!snap.exists()) {
+    throw new Error('Order not found.')
+  }
+  const data = snap.data() as Partial<Order>
+  if (data.status === 'ready' || data.status === 'completed' || data.status === 'cancelled') {
+    throw new Error('Order cannot be cancelled because it is already ready or finished.')
+  }
+  await updateDoc(orderRef, {
+    status: 'cancelled',
+    updatedAt: serverTimestamp(),
+  })
+  return true
 }
 
 /** Get a single order by ID */
