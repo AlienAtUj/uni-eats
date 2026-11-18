@@ -30,7 +30,7 @@ export type DeliveryStatus =
 export const OFFER_TIMEOUT_SECONDS = 45
 export const BASE_DELIVERY_FEE_CENTS = 1800
 export const PER_KM_DELIVERY_RATE_CENTS = 350
-export const MAX_DISPATCH_RADIUS_KM = 15
+export const MAX_DISPATCH_RADIUS_KM = 10
 
 export interface DriverDocuments {
   licenseUrl?: string

@@ -131,7 +131,7 @@ export function HomeScreen() {
     if (e) e.preventDefault()
     const q = addressSearchQuery.trim()
     if (!q) return
-    if (addressResults.length > 0) {
+    if (!isSearchingAddress && addressResults.length > 0) {
       handleSelectLocation(addressResults[0])
       return
     }
@@ -140,6 +140,8 @@ export function HomeScreen() {
       const results = await searchAddresses(q)
       if (results.length > 0) {
         handleSelectLocation(results[0])
+      } else if (addressResults.length > 0) {
+        handleSelectLocation(addressResults[0])
       }
     } finally {
       setIsSearchingAddress(false)
@@ -178,7 +180,7 @@ export function HomeScreen() {
   }
 
   const handleUseCurrentLocation = async () => {
-    const loc = await detectUserLocation()
+    const loc = await detectUserLocation(true)
     if (loc) {
       setLocationSheetOpen(false)
       setAddressSearchQuery('')
@@ -187,6 +189,9 @@ export function HomeScreen() {
   }
 
   const handleSelectLocation = (loc: DeliveryLocation) => {
+    if (!loc?.coords || !Number.isFinite(loc.coords.lat) || !Number.isFinite(loc.coords.lng)) {
+      return
+    }
     setUserLocation(loc)
     setLocationSheetOpen(false)
     setAddressSearchQuery('')

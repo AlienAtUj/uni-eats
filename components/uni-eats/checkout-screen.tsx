@@ -112,7 +112,14 @@ export function CheckoutScreen() {
   // Calculate real Road Distance via Google Maps Distance Matrix / Routes API (NEVER Haversine)
   useEffect(() => {
     if (!userLocation?.coords || !orderRestaurant) return
-    const shopCoords = resolveStoreCoords(orderRestaurant)
+    let shopCoords
+    try {
+      shopCoords = resolveStoreCoords(orderRestaurant)
+    } catch (err: any) {
+      setRoadDistanceKm(null)
+      setRoadDistanceError(err?.message || 'Store location coordinates are unavailable.')
+      return
+    }
     let cancelled = false
     setRoadDistanceError(null)
     fetchRoadDistanceKm(shopCoords, userLocation.coords)

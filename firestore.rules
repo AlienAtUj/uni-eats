@@ -6,6 +6,18 @@ service cloud.firestore {
     function isAuthenticated() {
       return request.auth != null;
     }
+
+    function validDriverLocation(loc) {
+      return loc is map
+        && loc.lat is number
+        && loc.lng is number
+        && loc.lat >= -35.5 && loc.lat <= -22.0
+        && loc.lng >= 16.0 && loc.lng <= 33.5
+        && (loc.lat != 0 || loc.lng != 0)
+        && loc.heading is number
+        && loc.heading >= 0 && loc.heading <= 360
+        && loc.updatedAt == request.time;
+    }
     function isOwner(userId) {
       return isAuthenticated() && request.auth.uid == userId;
     }
@@ -63,8 +75,26 @@ service cloud.firestore {
       allow update: if isAuthenticated() && (
         resource.data.customerId == request.auth.uid ||
         resource.data.merchantId == request.auth.uid ||
-        resource.data.driverId == request.auth.uid ||
-        resource.data.offeredToDriverId == request.auth.uid
+        resource.data.offeredToDriverId == request.auth.uid ||
+        (
+          resource.data.driverId == request.auth.uid &&
+          (
+            !('driverSessionId' in request.resource.data) ||
+            !(resource.data.driverSessionId is string) ||
+            request.resource.data.driverSessionId == resource.data.driverSessionId
+          ) &&
+          (
+            !('driverLocation' in request.resource.data.diff(resource.data).affectedKeys()) ||
+            validDriverLocation(request.resource.data.driverLocation)
+          ) &&
+          (
+            !(request.resource.data.status == 'completed' || request.resource.data.deliveryStatus == 'delivered') ||
+            (
+              resource.data.deliveryOtp is string &&
+              request.resource.data.proofOfDelivery.otpCode == resource.data.deliveryOtp
+            )
+          )
+        )
       );
       allow delete: if false; // Orders should never be deleted by clients
     }

@@ -23,6 +23,7 @@ import {
 } from '@/components/icons'
 import { BottomSheet } from '@/components/uni-eats/sheet'
 import { MerchantFinanceDashboard } from '@/components/uni-eats/merchant-finance-dashboard'
+import { StoreDashboard } from '@/components/uni-eats/store-kds-dashboard'
 import { validateInStorePrice } from '@/lib/dash-engine'
 import { formatPrice, isGroceryCategory, type StoreType } from '@/lib/data'
 import { DEPARTMENTS } from '@/lib/grocery-catalog'
@@ -30,6 +31,8 @@ import { MEAL_CATEGORIES } from '@/lib/meal-catalog'
 import {
   type Coordinates,
   type DeliveryLocation,
+  isValidSACoord,
+  correctLocationTypos,
   searchAddresses,
   searchInstantLocations,
   geocodeStoreAddress,
@@ -56,11 +59,11 @@ import { auth, db } from '@/lib/firebase'
 import { onAuthStateChanged, signOut, type User } from 'firebase/auth'
 import { fetchUserRole } from '@/lib/firebase-auth'
 import { useRouter } from 'next/navigation'
-import { doc, getDoc, setDoc } from 'firebase/firestore'
+import { doc, getDoc, setDoc, serverTimestamp } from 'firebase/firestore'
 import { cn } from '@/lib/utils'
 
 type MerchantTab = 'orders' | 'products' | 'store' | 'account'
-type OrderFilter = 'all' | 'pending' | 'preparing' | 'ready' | 'completed'
+type OrderFilter = 'all' | 'pending' | 'preparing' | 'ready' | 'out_for_delivery' | 'completed'
 
 const statusStyles: Record<OrderStatus, { pill: string; label: string }> = {
   pending: {
@@ -73,7 +76,11 @@ const statusStyles: Record<OrderStatus, { pill: string; label: string }> = {
   },
   ready: {
     pill: 'bg-primary text-primary-foreground',
-    label: 'Ready for Rider',
+    label: 'Ready',
+  },
+  out_for_delivery: {
+    pill: 'bg-[#e07a2e] text-white',
+    label: 'Out for Delivery',
   },
   completed: {
     pill: 'bg-secondary text-muted-foreground',
@@ -89,15 +96,17 @@ const statusPriority: Record<OrderStatus, number> = {
   pending: 0,
   preparing: 1,
   ready: 2,
-  completed: 3,
-  cancelled: 4,
+  out_for_delivery: 3,
+  completed: 4,
+  cancelled: 5,
 }
 
 const orderFilters: { key: OrderFilter; label: string }[] = [
   { key: 'all', label: 'All' },
   { key: 'pending', label: 'New' },
   { key: 'preparing', label: 'Preparing' },
-  { key: 'ready', label: 'Ready for Rider' },
+  { key: 'ready', label: 'Ready' },
+  { key: 'out_for_delivery', label: 'Out for Delivery' },
   { key: 'completed', label: 'Delivered' },
 ]
 
@@ -150,6 +159,9 @@ export default function StoreOwnerDashboard() {
   const [editingProductId, setEditingProductId] = useState<string | null>(null)
   const [editingPriceValue, setEditingPriceValue] = useState<string>('')
   const [isUpdatingPrice, setIsUpdatingPrice] = useState(false)
+  const [pickupPinInputs, setPickupPinInputs] = useState<Record<string, string>>({})
+  const [pickupPinErrors, setPickupPinErrors] = useState<Record<string, string>>({})
+  const [verifyingPickupId, setVerifyingPickupId] = useState<string | null>(null)
 
   useEffect(() => {
     let unsubOrders: (() => void) | null = null
@@ -277,12 +289,44 @@ export default function StoreOwnerDashboard() {
           setIsSearchingStoreAddress(false)
         }
       }
-    }, 120)
+    }, 260)
     return () => {
       clearTimeout(timer)
       controller.abort()
     }
   }, [storeAddressQuery])
+
+  const correctedStoreQueryHint = useMemo(() => {
+    const raw = storeAddressQuery.trim()
+    if (raw.length < 3) return null
+    const fixed = correctLocationTypos(raw)
+    return fixed.toLowerCase() !== raw.toLowerCase() ? fixed : null
+  }, [storeAddressQuery])
+
+  const handleSelectStoreLocation = (loc: DeliveryLocation) => {
+    setNewStoreLocation(loc.label)
+    setNewStoreCoords(loc.coords)
+    setStoreAddressQuery('')
+    setStoreAddressResults([])
+  }
+
+  const handleManualStoreAddressSubmit = async () => {
+    const q = storeAddressQuery.trim()
+    if (!q) return
+    if (storeAddressResults.length > 0) {
+      handleSelectStoreLocation(storeAddressResults[0])
+      return
+    }
+    setIsSearchingStoreAddress(true)
+    try {
+      const results = await searchAddresses(q)
+      if (results.length > 0) {
+        handleSelectStoreLocation(results[0])
+      }
+    } finally {
+      setIsSearchingStoreAddress(false)
+    }
+  }
 
   const handleUseStoreGpsLocation = async () => {
     setIsLocatingStoreGps(true)
@@ -477,12 +521,19 @@ export default function StoreOwnerDashboard() {
         resolvedCoords = await geocodeStoreAddress(cleanLoc)
       }
 
+      if (!resolvedCoords || !isValidSACoord(resolvedCoords.lat, resolvedCoords.lng)) {
+        alert('Please select a valid store address or GPS pin inside South Africa before saving.')
+        return
+      }
+
       const userPayload: Record<string, any> = {
         name: cleanName,
         storeName: cleanName,
         storeLocation: cleanLoc,
         storeType: newStoreType,
         deliveryRadiusKm: SERVICE_DELIVERY_RADIUS_KM,
+        coords: resolvedCoords,
+        coordsVerifiedAt: serverTimestamp(),
       }
       const restPayload: Record<string, any> = {
         name: cleanName,
@@ -490,12 +541,10 @@ export default function StoreOwnerDashboard() {
         pickupTime: cleanPickup,
         storeType: newStoreType,
         deliveryRadiusKm: SERVICE_DELIVERY_RADIUS_KM,
+        coords: resolvedCoords,
+        coordsVerifiedAt: serverTimestamp(),
       }
-      if (resolvedCoords) {
-        userPayload.coords = resolvedCoords
-        restPayload.coords = resolvedCoords
-        setNewStoreCoords(resolvedCoords)
-      }
+      setNewStoreCoords(resolvedCoords)
 
       await Promise.all([
         setDoc(doc(db, 'users', merchantId), userPayload, { merge: true }),
@@ -505,7 +554,7 @@ export default function StoreOwnerDashboard() {
       setMerchantName(cleanName)
       setStoreType(newStoreType)
       setStoreLocation(cleanLoc)
-      setStoreCoords(newStoreCoords)
+      setStoreCoords(resolvedCoords)
       setStorePickupTime(cleanPickup)
       setSavedStoreSuccess(true)
       setTimeout(() => setSavedStoreSuccess(false), 2500)
@@ -527,18 +576,35 @@ export default function StoreOwnerDashboard() {
     (o) => o.status === 'preparing',
   ).length
   const readyOrdersCount = orders.filter((o) => o.status === 'ready').length
+  const outForDeliveryOrdersCount = orders.filter(
+    (o) => o.status === 'out_for_delivery',
+  ).length
   const completedOrdersCount = orders.filter(
     (o) => o.status === 'completed',
   ).length
   const activeOrdersCount =
-    pendingOrdersCount + preparingOrdersCount + readyOrdersCount
+    pendingOrdersCount + preparingOrdersCount + readyOrdersCount + outForDeliveryOrdersCount
 
   const filterCounts: Record<OrderFilter, number> = {
     all: orders.length,
     pending: pendingOrdersCount,
     preparing: preparingOrdersCount,
     ready: readyOrdersCount,
+    out_for_delivery: outForDeliveryOrdersCount,
     completed: completedOrdersCount,
+  }
+
+  const [isPaused, setIsPaused] = useState(false)
+
+  const handleTogglePause = async () => {
+    const next = !isPaused
+    setIsPaused(next)
+    if (!merchantId) return
+    try {
+      await setDoc(doc(db, 'restaurants', merchantId), { isPaused: next }, { merge: true })
+    } catch (err) {
+      console.error('Failed to update store pause state:', err)
+    }
   }
 
   const totalRevenue = orders
@@ -549,94 +615,162 @@ export default function StoreOwnerDashboard() {
     storeType === 'grocery' ? 'Shop / Grocery Owner' : 'Restaurant Owner'
 
   return (
-    <div className="flex h-dvh justify-center bg-[#f3f3f3] md:h-auto md:min-h-dvh md:py-8">
-      {/* Same Phone Frame Shell as Student App */}
-      <div className="relative flex h-full w-full max-w-md flex-col overflow-hidden bg-background shadow-2xl md:h-[860px] md:rounded-[2.75rem] md:ring-8 md:ring-[#e2e2e2]">
+    <div className="min-h-dvh w-full bg-[#F4F4F5] font-sans text-[#09090B]">
+      <div className="mx-auto flex min-h-dvh w-full max-w-7xl flex-col border-x border-zinc-200 bg-[#F4F4F5]">
         {isCheckingAccess ? (
-          <div className="flex flex-1 items-center justify-center">
-            <div className="h-8 w-8 animate-spin rounded-full border-4 border-primary border-t-transparent" />
+          <div className="flex flex-1 items-center justify-center p-12">
+            <div className="border border-zinc-200 bg-white rounded-md px-6 py-4 text-xs font-black uppercase tracking-widest text-[#71717A]">
+              AUTHENTICATING PARTNER PORTAL...
+            </div>
           </div>
         ) : (
           <>
-            <main className="min-h-0 flex-1 overflow-y-auto overscroll-contain pb-6">
-              {/* Top Header (matches HomeScreen) */}
-              <header className="bg-[#287d46] px-5 pb-6 pt-5 text-white">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2.5 min-w-0">
-                    <span className="flex h-9 w-9 shrink-0 items-center justify-center overflow-hidden rounded-xl bg-[oklch(0.97_0.02_120)]/10">
-                      <Image
-                        src="/dash-logo.jpg"
-                        alt="Dash"
-                        width={36}
-                        height={36}
-                        className="h-full w-full object-cover"
-                      />
-                    </span>
-                    <div className="min-w-0">
-                      <p className="text-[11px] font-medium text-[oklch(0.97_0.02_120)]/70">
-                        Dash Partner Portal · {storeTypeLabel}
-                      </p>
-                      <p className="truncate text-sm font-extrabold tracking-tight">
-                        {merchantName}
-                      </p>
-                    </div>
+            {/* Sticky Industrial Top Header + Desktop Navigation */}
+            <header className="sticky top-0 z-30 border-b border-zinc-200 bg-white px-4 py-3 sm:px-6">
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div className="flex min-w-0 items-center gap-3">
+                  <span className="flex h-10 w-10 shrink-0 items-center justify-center overflow-hidden rounded-sm border border-zinc-200 bg-[#09090B]">
+                    <Image
+                      src="/dash-logo.jpg"
+                      alt="Dash"
+                      width={40}
+                      height={40}
+                      className="h-full w-full object-cover"
+                    />
+                  </span>
+                  <div className="min-w-0">
+                    <p className="text-[10px] font-bold uppercase tracking-widest text-[#71717A]">
+                      PARTNER PORTAL · {storeType === 'grocery' ? 'SHOP / GROCERY' : 'RESTAURANT'}
+                    </p>
+                    <p className="truncate text-lg font-black leading-tight tracking-tight text-[#09090B] sm:text-xl">
+                      {merchantName}
+                    </p>
                   </div>
+                </div>
+
+                {/* Desktop Tab Navigation (hidden on mobile; mobile uses bottom bar) */}
+                <nav className="hidden md:flex items-center gap-1.5" aria-label="Primary">
+                  {(
+                    [
+                      { id: 'orders', label: 'ORDERS', count: activeOrdersCount },
+                      { id: 'products', label: 'MENU', count: allProducts.length },
+                      { id: 'store', label: 'STORE', count: null },
+                      { id: 'account', label: 'ACCOUNT', count: null },
+                    ] as const
+                  ).map((item) => {
+                    const active = activeTab === item.id
+                    return (
+                      <button
+                        key={item.id}
+                        type="button"
+                        onClick={() => setActiveTab(item.id)}
+                        className={cn(
+                          'inline-flex items-center gap-2 rounded-sm px-3.5 py-2 text-xs font-black uppercase tracking-widest transition-colors',
+                          active
+                            ? 'bg-[#09090B] text-white'
+                            : 'border border-zinc-200 bg-white text-[#71717A] hover:text-[#09090B]'
+                        )}
+                      >
+                        <span>{item.label}</span>
+                        {item.count !== null && (
+                          <span
+                            className={cn(
+                              'rounded-sm px-1.5 py-0.5 text-[10px] font-black [font-variant-numeric:tabular-nums]',
+                              active ? 'bg-white/20 text-white' : 'bg-[#F4F4F5] text-[#09090B]'
+                            )}
+                          >
+                            {item.count}
+                          </span>
+                        )}
+                      </button>
+                    )
+                  })}
+                </nav>
+
+                {/* Right: Compact Location Jump + Account Initial */}
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setActiveTab('store')}
+                    className="hidden sm:inline-flex max-w-[220px] items-center gap-2 rounded-sm border border-zinc-200 bg-[#F4F4F5] px-3 py-2 text-left text-xs font-bold text-[#09090B] hover:bg-zinc-200/70"
+                    title={`${storeLocation} · ${storePickupTime}`}
+                  >
+                    <span className="h-2 w-2 shrink-0 rounded-full bg-[#047857]" />
+                    <span className="truncate">{storeLocation}</span>
+                  </button>
                   <button
                     type="button"
                     onClick={() => setActiveTab('account')}
-                    className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-[oklch(0.97_0.02_120)]/10 text-sm font-bold text-[oklch(0.97_0.02_120)]"
+                    className="flex h-9 w-9 shrink-0 items-center justify-center rounded-sm border border-zinc-200 bg-[#F4F4F5] text-xs font-black uppercase text-[#09090B] hover:bg-zinc-200"
                     aria-label="Store account"
                   >
-                    {merchantName.charAt(0).toUpperCase()}
+                    {merchantName.slice(0, 2).toUpperCase()}
                   </button>
                 </div>
+              </div>
 
-                {/* Location & Store Type Pill */}
-                <button
-                  type="button"
-                  onClick={() => setActiveTab('store')}
-                  className="mt-4 flex items-center gap-2 rounded-full bg-[oklch(0.97_0.02_120)]/10 px-3.5 py-1.5 text-xs font-semibold text-[oklch(0.97_0.02_120)]"
-                >
-                  <PinIcon className="h-3.5 w-3.5 text-accent" />
+              {/* Mobile Location Strip */}
+              <button
+                type="button"
+                onClick={() => setActiveTab('store')}
+                className="mt-2.5 flex w-full items-center justify-between rounded-sm border border-zinc-200 bg-[#F4F4F5] px-3 py-2 text-left sm:hidden"
+              >
+                <span className="flex min-w-0 items-center gap-2 text-xs font-bold text-[#09090B]">
+                  <span className="h-2 w-2 shrink-0 rounded-full bg-[#047857]" />
                   <span className="truncate">
                     {storeLocation} · {storePickupTime}
                   </span>
-                  <ChevronDownIcon className="h-3.5 w-3.5 opacity-80" />
-                </button>
+                </span>
+                <span className="ml-2 shrink-0 text-[10px] font-black uppercase tracking-widest text-[#71717A]">
+                  EDIT
+                </span>
+              </button>
 
-                {/* Search Input for Orders & Menu tabs */}
-                {(activeTab === 'orders' || activeTab === 'products') && (
-                  <div className="mt-4 flex items-center gap-2.5 rounded-2xl bg-card px-4 py-3 text-card-foreground shadow-sm">
-                    <SearchIcon className="h-5 w-5 text-muted-foreground" />
-                    <input
-                      type="search"
-                      value={searchQuery}
-                      onChange={(e) => setSearchQuery(e.target.value)}
-                      placeholder={
-                        activeTab === 'orders'
-                          ? 'Search order ID, customer, or meal...'
-                          : 'Search your menu items...'
-                      }
-                      className="w-full bg-transparent text-sm placeholder:text-muted-foreground focus:outline-none"
-                    />
-                    {searchQuery && (
-                      <button
-                        type="button"
-                        onClick={() => setSearchQuery('')}
-                        className="rounded-full bg-secondary p-1 text-muted-foreground"
-                        aria-label="Clear search"
-                      >
-                        <CloseIcon className="h-3.5 w-3.5" />
-                      </button>
-                    )}
-                  </div>
-                )}
-              </header>
+              {/* Search Input for Orders & Menu tabs */}
+              {(activeTab === 'orders' || activeTab === 'products') && (
+                <div className="mt-2.5 flex items-center gap-2 rounded-sm border border-zinc-200 bg-[#F4F4F5] px-3 py-2">
+                  <span className="text-[10px] font-black uppercase tracking-widest text-[#71717A]">
+                    FIND
+                  </span>
+                  <input
+                    type="search"
+                    value={searchQuery}
+                    onChange={(e) => setSearchQuery(e.target.value)}
+                    placeholder={
+                      activeTab === 'orders'
+                        ? 'Search order ID, customer, or meal...'
+                        : 'Search menu items or categories...'
+                    }
+                    className="w-full bg-transparent text-sm font-medium text-[#09090B] placeholder:text-[#71717A] focus:outline-none"
+                  />
+                  {searchQuery && (
+                    <button
+                      type="button"
+                      onClick={() => setSearchQuery('')}
+                      className="rounded-sm border border-zinc-200 bg-white px-2 py-0.5 text-[10px] font-black uppercase tracking-widest text-[#09090B]"
+                    >
+                      CLR
+                    </button>
+                  )}
+                </div>
+              )}
+            </header>
 
-              {/* TAB 1: ORDERS */}
+            <main className="min-h-0 flex-1 overflow-y-auto overscroll-contain pb-20 md:pb-6">
+              {/* TAB 1: ORDERS (High-Density KDS & Enterprise SaaS Dashboard) */}
               {activeTab === 'orders' && (
-                <div>
-                  <div className="px-5 pt-4">
+                <StoreDashboard
+                  merchantName={merchantName}
+                  storeType={storeType === 'grocery' ? 'grocery' : 'food'}
+                  orders={filteredOrders}
+                  isLoading={isLoadingOrders}
+                  isPaused={isPaused}
+                  onTogglePause={handleTogglePause}
+                  onUpdateStatus={handleStatusUpdate}
+                  onVerifyPickupPin={async (orderId, pin) => {
+                    await verifyOrderPickupPin(orderId, pin)
+                  }}
+                  financeSlot={
                     <MerchantFinanceDashboard
                       merchantName={merchantName}
                       storeType={storeType === 'grocery' ? 'grocery' : 'food'}
@@ -686,383 +820,76 @@ export default function StoreOwnerDashboard() {
                         }
                       })}
                     />
-                  </div>
-                  {/* Priority New Orders Banner when new orders are waiting */}
-                  {pendingOrdersCount > 0 && (
-                    <div className="mx-5 mt-4 flex items-center justify-between gap-3 rounded-2xl bg-accent/15 px-4 py-3 ring-1 ring-accent/40">
-                      <div className="flex items-center gap-2.5 min-w-0">
-                        <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-accent text-accent-foreground">
-                          <BellIcon className="h-4 w-4" />
-                        </span>
-                        <div className="min-w-0">
-                          <p className="text-xs font-extrabold text-foreground">
-                            {pendingOrdersCount} New Order
-                            {pendingOrdersCount === 1 ? '' : 's'} Waiting
-                          </p>
-                          <p className="truncate text-[11px] text-muted-foreground">
-                            Accept to start preparing for pickup
-                          </p>
-                        </div>
-                      </div>
-                      {orderFilter !== 'pending' && (
-                        <button
-                          type="button"
-                          onClick={() => setOrderFilter('pending')}
-                          className="shrink-0 rounded-full bg-accent px-3 py-1.5 text-[11px] font-bold text-accent-foreground shadow-sm"
-                        >
-                          View New
-                        </button>
-                      )}
-                    </div>
-                  )}
-
-                  {/* Compact 2-Card Summary Strip */}
-                  <div className="mt-4 grid grid-cols-2 gap-3 px-5">
-                    <button
-                      type="button"
-                      onClick={() =>
-                        setOrderFilter(
-                          pendingOrdersCount > 0 ? 'pending' : 'all',
-                        )
-                      }
-                      className={cn(
-                        'rounded-3xl bg-card p-3.5 text-left shadow-sm ring-1 transition-colors',
-                        pendingOrdersCount > 0
-                          ? 'ring-accent/60'
-                          : 'ring-border',
-                      )}
-                    >
-                      <div className="flex items-center justify-between">
-                        <span className="text-xs font-medium text-muted-foreground">
-                          New Orders
-                        </span>
-                        <span
-                          className={cn(
-                            'flex h-7 w-7 items-center justify-center rounded-full',
-                            pendingOrdersCount > 0
-                              ? 'bg-accent text-accent-foreground'
-                              : 'bg-primary/10 text-primary',
-                          )}
-                        >
-                          <BellIcon className="h-4 w-4" />
-                        </span>
-                      </div>
-                      <p className="mt-1.5 text-xl font-extrabold text-foreground">
-                        {pendingOrdersCount}
-                      </p>
-                      <p className="text-[11px] text-muted-foreground">
-                        {activeOrdersCount} active in kitchen
-                      </p>
-                    </button>
-
-                    <div className="rounded-3xl bg-card p-3.5 shadow-sm ring-1 ring-border">
-                      <div className="flex items-center justify-between">
-                        <span className="text-xs font-medium text-muted-foreground">
-                          Revenue
-                        </span>
-                        <span className="flex h-7 w-7 items-center justify-center rounded-full bg-primary/10 text-primary">
-                          <TrendingUpIcon className="h-4 w-4" />
-                        </span>
-                      </div>
-                      <p className="mt-1.5 truncate text-xl font-extrabold text-foreground">
-                        {formatPrice(totalRevenue)}
-                      </p>
-                      <p className="text-[11px] text-muted-foreground">
-                        {orders.length} total orders
-                      </p>
-                    </div>
-                  </div>
-
-                  {/* Order Status Filter Pills with Live Counts */}
-                  <div className="no-scrollbar mt-4 flex gap-2 overflow-x-auto px-5 pb-1">
-                    {orderFilters.map((f) => {
-                      const active = orderFilter === f.key
-                      const count = filterCounts[f.key]
-                      return (
-                        <button
-                          key={f.key}
-                          type="button"
-                          onClick={() => setOrderFilter(f.key)}
-                          className={cn(
-                            'inline-flex shrink-0 items-center gap-1.5 rounded-full px-3.5 py-2 text-xs font-semibold transition-colors',
-                            active
-                              ? 'bg-primary text-primary-foreground shadow-sm'
-                              : f.key === 'pending' && count > 0
-                                ? 'bg-accent/15 text-foreground ring-1 ring-accent/40'
-                                : 'bg-card text-foreground ring-1 ring-border',
-                          )}
-                        >
-                          <span>{f.label}</span>
-                          <span
-                            className={cn(
-                              'rounded-full px-1.5 py-0.2 text-[10px] font-extrabold',
-                              active
-                                ? 'bg-primary-foreground/20 text-primary-foreground'
-                                : f.key === 'pending' && count > 0
-                                  ? 'bg-accent text-accent-foreground'
-                                  : 'bg-secondary text-muted-foreground',
-                            )}
-                          >
-                            {count}
-                          </span>
-                        </button>
-                      )
-                    })}
-                  </div>
-
-                  {/* Orders List (New Orders always sorted to the top) */}
-                  <div className="mt-4 flex flex-col gap-3 px-5">
-                    {isLoadingOrders ? (
-                      <div className="rounded-3xl bg-card p-10 text-center shadow-sm ring-1 ring-border">
-                        <div className="mx-auto h-7 w-7 animate-spin rounded-full border-4 border-primary border-t-transparent" />
-                        <p className="mt-3 text-xs font-medium text-muted-foreground">
-                          Loading live orders...
-                        </p>
-                      </div>
-                    ) : filteredOrders.length > 0 ? (
-                      filteredOrders.map((order) => {
-                        const isNewOrder = order.status === 'pending'
-                        const statusInfo =
-                          statusStyles[order.status as OrderStatus] ||
-                          statusStyles.pending
-                        const isPaid = order.paymentStatus === 'paid'
-
-                        return (
-                          <div
-                            key={order.id}
-                            className={cn(
-                              'flex flex-col gap-3 rounded-3xl bg-card p-4 shadow-sm transition-all',
-                              isNewOrder
-                                ? 'ring-2 ring-accent shadow-md'
-                                : 'ring-1 ring-border',
-                            )}
-                          >
-                            {/* Top Row: ID + Customer + Status Badge */}
-                            <div className="flex items-start justify-between gap-2">
-                              <div className="min-w-0">
-                                <div className="flex items-center gap-2">
-                                  <h3 className="text-base font-extrabold text-card-foreground">
-                                    {order.orderId || order.id.slice(0, 8)}
-                                  </h3>
-                                  {isPaid ? (
-                                    <span className="inline-flex items-center gap-1 rounded-full bg-primary/10 px-2 py-0.5 text-[10px] font-bold text-primary">
-                                      <CheckIcon className="h-3 w-3" />
-                                      <span>Paid</span>
-                                    </span>
-                                  ) : (
-                                    <span className="rounded-full bg-secondary px-2 py-0.5 text-[10px] font-semibold text-muted-foreground">
-                                      Cash
-                                    </span>
-                                  )}
-                                </div>
-                                <p className="mt-0.5 truncate text-xs text-muted-foreground">
-                                  {order.customerName || 'Dash Customer'} ·{' '}
-                                  {order.pickupTime || storePickupTime}
-                                </p>
-                              </div>
-
-                              <span
-                                className={cn(
-                                  'shrink-0 rounded-full px-2.5 py-1 text-[11px] font-bold',
-                                  isNewOrder
-                                    ? 'bg-accent text-accent-foreground'
-                                    : statusInfo.pill,
-                                )}
-                              >
-                                {isNewOrder ? 'New Order' : statusInfo.label}
-                              </span>
-                            </div>
-
-                            {/* Items Box */}
-                            <div className="flex flex-col gap-1.5 rounded-2xl bg-secondary/60 p-3">
-                              {(order.items || []).map((it: any, idx: number) => (
-                                <div
-                                  key={`${order.id}-item-${idx}`}
-                                  className="flex items-start justify-between gap-2 text-xs"
-                                >
-                                  <div className="min-w-0">
-                                    <span className="font-bold text-foreground">
-                                      {it.quantity}x {it.name}
-                                    </span>
-                                    {Array.isArray(it.modifiers) &&
-                                      it.modifiers.length > 0 && (
-                                        <p className="truncate text-[11px] text-muted-foreground">
-                                          {it.modifiers
-                                            .map((m: any) => m.label)
-                                            .filter(Boolean)
-                                            .join(', ')}
-                                        </p>
-                                      )}
-                                  </div>
-                                  {Number(it.price) > 0 && (
-                                    <span className="shrink-0 font-semibold text-muted-foreground">
-                                      {formatPrice(
-                                        Number(it.price) *
-                                          (Number(it.quantity) || 1),
-                                      )}
-                                    </span>
-                                  )}
-                                </div>
-                              ))}
-                            </div>
-
-                            {/* Total + Handover Codes + Action Row */}
-                            <div className="flex items-center justify-between gap-3 pt-0.5">
-                              <div className="flex items-center gap-3">
-                                <div>
-                                  <span className="block text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
-                                    Total
-                                  </span>
-                                  <span className="text-base font-extrabold text-foreground">
-                                    {formatPrice(order.total)}
-                                  </span>
-                                </div>
-                                {(order.pickupPin || order.deliveryOtp) && (
-                                  <div className="rounded-lg bg-[#287d46]/10 px-2.5 py-1">
-                                    <span className="block text-[9px] font-bold uppercase tracking-wider text-[#287d46]">
-                                      PIN / OTP
-                                    </span>
-                                    <span className="font-mono text-xs font-black text-[#111111]">
-                                      {order.pickupPin || '----'} / {order.deliveryOtp || '----'}
-                                    </span>
-                                  </div>
-                                )}
-                              </div>
-
-                              {order.status === 'pending' && (
-                                <button
-                                  type="button"
-                                  onClick={() =>
-                                    handleStatusUpdate(order.id, 'preparing')
-                                  }
-                                  className="rounded-full bg-primary px-5 py-2.5 text-xs font-bold text-primary-foreground shadow-sm transition-transform active:scale-95"
-                                >
-                                  Accept & Prepare
-                                </button>
-                              )}
-                              {order.status === 'preparing' && (
-                                <button
-                                  type="button"
-                                  onClick={() =>
-                                    handleStatusUpdate(order.id, 'ready')
-                                  }
-                                  className="inline-flex items-center gap-1.5 rounded-full bg-accent px-5 py-2.5 text-xs font-bold text-accent-foreground shadow-sm transition-transform active:scale-95"
-                                >
-                                  <BellIcon className="h-3.5 w-3.5" />
-                                  <span>Mark Ready</span>
-                                </button>
-                              )}
-                              {order.status === 'ready' && (
-                                <button
-                                  type="button"
-                                  onClick={() =>
-                                    handleStatusUpdate(order.id, 'completed')
-                                  }
-                                  className="inline-flex items-center gap-1.5 rounded-full bg-primary px-5 py-2.5 text-xs font-bold text-primary-foreground shadow-sm transition-transform active:scale-95"
-                                >
-                                  <CheckIcon className="h-3.5 w-3.5" />
-                                  <span>Mark Delivered</span>
-                                </button>
-                              )}
-                              {order.status === 'completed' && (
-                                <span className="inline-flex items-center gap-1 rounded-full bg-primary/10 px-3.5 py-1.5 text-xs font-bold text-primary">
-                                  <CheckIcon className="h-3.5 w-3.5" />
-                                  <span>Completed</span>
-                                </span>
-                              )}
-                            </div>
-                          </div>
-                        )
-                      })
-                    ) : (
-                      <div className="rounded-3xl bg-card p-8 text-center shadow-sm ring-1 ring-border">
-                        <span className="mx-auto flex h-14 w-14 items-center justify-center rounded-full bg-secondary text-muted-foreground">
-                          <BagIcon className="h-7 w-7" />
-                        </span>
-                        <p className="mt-3 text-base font-bold text-foreground">
-                          No orders found
-                        </p>
-                        <p className="mx-auto mt-1 max-w-xs text-xs text-muted-foreground">
-                          Customer orders placed for {merchantName} will appear here in real time.
-                        </p>
-                      </div>
-                    )}
-                  </div>
-                </div>
+                  }
+                />
               )}
 
               {/* TAB 2: MENU / PRODUCTS */}
               {activeTab === 'products' && (
-                <div className="mt-4 px-5">
-                  {/* Business Mode Switcher: Upload as Restaurant Owner vs Shop Owner */}
-                  <div className="mb-4 rounded-3xl bg-card p-3.5 shadow-sm ring-1 ring-border">
-                    <div className="mb-2 flex items-center justify-between">
-                      <span className="text-[11px] font-bold uppercase tracking-wider text-muted-foreground">
-                        Operating & Uploading Mode
-                      </span>
-                      <span className="rounded-full bg-primary/10 px-2.5 py-0.5 text-[10px] font-extrabold text-primary">
-                        {storeType === 'grocery' ? 'Shop (Stores)' : 'Eat (Meals)'}
-                      </span>
-                    </div>
-                    <div className="grid grid-cols-2 gap-2 rounded-2xl bg-secondary p-1">
-                      <button
-                        type="button"
-                        onClick={() => handleQuickSwitchStoreType('restaurant')}
-                        className={cn(
-                          'flex items-center justify-center gap-1.5 rounded-xl py-2.5 text-xs font-bold transition-all',
-                          storeType === 'restaurant'
-                            ? 'bg-primary text-primary-foreground shadow-sm'
-                            : 'text-muted-foreground hover:text-foreground',
-                        )}
-                      >
-                        <StoreIcon className="h-3.5 w-3.5" />
-                        <span>Restaurant Owner</span>
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => handleQuickSwitchStoreType('grocery')}
-                        className={cn(
-                          'flex items-center justify-center gap-1.5 rounded-xl py-2.5 text-xs font-bold transition-all',
-                          storeType === 'grocery'
-                            ? 'bg-primary text-primary-foreground shadow-sm'
-                            : 'text-muted-foreground hover:text-foreground',
-                        )}
-                      >
-                        <BagIcon className="h-3.5 w-3.5" />
-                        <span>Shop / Grocery Owner</span>
-                      </button>
+                <div className="p-4 sm:p-6 space-y-4">
+                  {/* Operating Mode + Catalog Header */}
+                  <div className="border border-zinc-200 bg-white rounded-md p-4">
+                    <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+                      <div>
+                        <span className="text-[10px] font-bold uppercase tracking-widest text-[#71717A]">
+                          OPERATING & UPLOADING MODE
+                        </span>
+                        <div className="mt-1.5 grid grid-cols-2 gap-2 sm:inline-flex">
+                          <button
+                            type="button"
+                            onClick={() => handleQuickSwitchStoreType('restaurant')}
+                            className={cn(
+                              'rounded-sm px-4 py-2 text-xs font-black uppercase tracking-widest transition-colors',
+                              storeType === 'restaurant'
+                                ? 'bg-[#09090B] text-white'
+                                : 'border border-zinc-200 bg-[#F4F4F5] text-[#71717A] hover:text-[#09090B]'
+                            )}
+                          >
+                            RESTAURANT (MEALS)
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleQuickSwitchStoreType('grocery')}
+                            className={cn(
+                              'rounded-sm px-4 py-2 text-xs font-black uppercase tracking-widest transition-colors',
+                              storeType === 'grocery'
+                                ? 'bg-[#09090B] text-white'
+                                : 'border border-zinc-200 bg-[#F4F4F5] text-[#71717A] hover:text-[#09090B]'
+                            )}
+                          >
+                            SHOP / GROCERY
+                          </button>
+                        </div>
+                      </div>
+
+                      <div className="flex flex-wrap items-center justify-between gap-4 border-t border-zinc-200 pt-3 lg:border-t-0 lg:pt-0">
+                        <div>
+                          <span className="block text-[10px] font-bold uppercase tracking-widest text-[#71717A]">
+                            LIVE CATALOG
+                          </span>
+                          <span className="text-xl font-black text-[#09090B] [font-variant-numeric:tabular-nums]">
+                            {allProducts.length} ITEMS
+                          </span>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setEditingProduct(null)
+                            setUploadDefaultStoreType(storeType)
+                            setIsModalOpen(true)
+                          }}
+                          className="rounded-sm bg-[#047857] px-4 py-2.5 text-xs font-black uppercase tracking-widest text-white transition-colors hover:bg-[#065F46]"
+                        >
+                          + {storeType === 'grocery' ? 'ADD SHOP PRODUCT' : 'ADD MEAL'}
+                        </button>
+                      </div>
                     </div>
                   </div>
 
-                  <div className="mb-3 flex items-center justify-between gap-2">
-                    <div>
-                      <h2 className="text-lg font-extrabold tracking-tight text-foreground">
-                        {storeType === 'grocery' ? 'Shop Inventory' : 'Menu Catalog'}
-                      </h2>
-                      <p className="text-xs text-muted-foreground">
-                        {allProducts.length} item{allProducts.length === 1 ? '' : 's'} live in your{' '}
-                        {storeType === 'grocery' ? 'shop' : 'restaurant'}
-                      </p>
-                    </div>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setEditingProduct(null)
-                        setUploadDefaultStoreType(storeType)
-                        setIsModalOpen(true)
-                      }}
-                      className="inline-flex items-center gap-1.5 rounded-full bg-primary px-4 py-2 text-xs font-bold text-primary-foreground shadow-sm transition-transform active:scale-95"
-                    >
-                      <PlusIcon className="h-4 w-4" />
-                      <span>
-                        {storeType === 'grocery' ? 'Add Shop Product' : 'Add Meal'}
-                      </span>
-                    </button>
-                  </div>
-
-                  <div className="flex flex-col gap-3">
-                    {filteredProducts.length > 0 ? (
-                      filteredProducts.map((p) => {
+                  {/* Responsive Product Grid */}
+                  {filteredProducts.length > 0 ? (
+                    <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3">
+                      {filteredProducts.map((p) => {
                         const modCount = Array.isArray(p.modifierGroups)
                           ? p.modifierGroups.length
                           : 0
@@ -1070,61 +897,59 @@ export default function StoreOwnerDashboard() {
                           p.storeType === 'grocery' || isGroceryCategory(p.category)
 
                         return (
-                          <div
+                          <article
                             key={p.id}
-                            className="flex flex-col gap-3 rounded-3xl bg-card p-3.5 shadow-sm ring-1 ring-border"
+                            className="flex flex-col justify-between gap-3 border border-zinc-200 bg-white rounded-md p-3.5"
                           >
-                            <div className="flex gap-3.5">
+                            <div className="flex gap-3">
                               <div className="flex min-w-0 flex-1 flex-col">
                                 <div className="flex flex-wrap items-center gap-1.5">
                                   <span
                                     className={cn(
-                                      'rounded-full px-2 py-0.5 text-[10px] font-bold',
-                                      isGroceryItem
-                                        ? 'bg-emerald-500/15 text-emerald-700'
-                                        : 'bg-accent/20 text-accent-foreground',
+                                      'text-[10px] font-black uppercase tracking-widest',
+                                      isGroceryItem ? 'text-[#047857]' : 'text-[#1D4ED8]'
                                     )}
                                   >
-                                    {isGroceryItem ? 'Shop' : 'Restaurant'}
+                                    [{isGroceryItem ? 'SHOP' : 'FOOD'}]
                                   </span>
-                                  <span className="rounded-full bg-secondary px-2 py-0.5 text-[10px] font-bold text-muted-foreground">
-                                    {p.category || 'Menu'}
+                                  <span className="rounded-sm border border-zinc-200 bg-[#F4F4F5] px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wider text-[#71717A]">
+                                    {p.category || 'MENU'}
                                   </span>
                                   {p.size && (
-                                    <span className="rounded-full bg-secondary px-2 py-0.5 text-[10px] font-semibold text-foreground">
+                                    <span className="rounded-sm border border-zinc-200 px-1.5 py-0.5 text-[10px] font-bold text-[#09090B]">
                                       {p.size}
                                     </span>
                                   )}
                                   {modCount > 0 && (
-                                    <span className="rounded-full bg-primary/10 px-2 py-0.5 text-[10px] font-bold text-primary">
-                                      +{modCount} option{modCount === 1 ? '' : 's'}
+                                    <span className="text-[10px] font-bold text-[#71717A]">
+                                      +{modCount} OPT
                                     </span>
                                   )}
                                 </div>
 
-                                <h3 className="mt-1 truncate text-base font-bold text-card-foreground">
+                                <h3 className="mt-1.5 truncate text-sm font-black text-[#09090B]">
                                   {p.name}
                                 </h3>
 
                                 {p.description && (
-                                  <p className="mt-0.5 line-clamp-2 text-xs text-muted-foreground">
+                                  <p className="mt-0.5 line-clamp-2 text-xs text-[#71717A]">
                                     {p.description}
                                   </p>
                                 )}
 
                                 <div className="mt-auto flex items-baseline gap-2 pt-2">
-                                  <span className="text-sm font-extrabold text-primary">
+                                  <span className="text-base font-black text-[#09090B] [font-variant-numeric:tabular-nums]">
                                     {formatPrice(p.price)}
                                   </span>
                                   {p.oldPrice && Number(p.oldPrice) > Number(p.price) && (
-                                    <span className="text-xs font-semibold text-muted-foreground line-through">
+                                    <span className="text-xs font-bold text-[#71717A] line-through [font-variant-numeric:tabular-nums]">
                                       {formatPrice(Number(p.oldPrice))}
                                     </span>
                                   )}
                                 </div>
                               </div>
 
-                              <div className="relative h-24 w-24 shrink-0 overflow-hidden rounded-2xl bg-secondary ring-1 ring-border">
+                              <div className="relative h-20 w-20 shrink-0 overflow-hidden rounded-sm border border-zinc-200 bg-[#F4F4F5]">
                                 {p.images && p.images.length > 0 && p.images[0] && p.images[0].trim() ? (
                                   <Image
                                     src={p.images[0].trim()}
@@ -1133,461 +958,489 @@ export default function StoreOwnerDashboard() {
                                     className="object-cover"
                                   />
                                 ) : (
-                                  <div className="flex h-full w-full items-center justify-center text-muted-foreground">
-                                    <PackageIcon className="h-6 w-6 opacity-40" />
+                                  <div className="flex h-full w-full items-center justify-center text-[10px] font-black uppercase tracking-widest text-[#71717A]">
+                                    NO IMG
                                   </div>
                                 )}
                               </div>
                             </div>
 
-                            {/* Inline Price Editor or Action Bar */}
                             {editingProductId === p.id ? (
-                              <div className="flex items-center gap-2 border-t border-border/60 pt-2.5">
-                                <span className="text-xs font-bold text-muted-foreground">
-                                  R
-                                </span>
+                              <div className="flex items-center gap-2 border-t border-zinc-200 pt-2.5">
+                                <span className="text-xs font-black text-[#71717A]">R</span>
                                 <input
                                   type="number"
                                   step="any"
                                   min="0.01"
                                   value={editingPriceValue}
-                                  onChange={(e) =>
-                                    setEditingPriceValue(e.target.value)
-                                  }
-                                  className="flex-1 rounded-xl border bg-background px-3 py-1.5 text-sm font-bold text-foreground outline-none focus:border-primary"
+                                  onChange={(e) => setEditingPriceValue(e.target.value)}
+                                  className="min-w-0 flex-1 rounded-sm border border-zinc-300 bg-[#F4F4F5] px-2.5 py-1.5 text-sm font-black text-[#09090B] [font-variant-numeric:tabular-nums] outline-none focus:border-[#09090B] focus:bg-white"
                                   autoFocus
                                 />
                                 <button
                                   type="button"
                                   onClick={() => handleSavePrice(p.id)}
                                   disabled={isUpdatingPrice}
-                                  className="rounded-full bg-primary px-4 py-1.5 text-xs font-bold text-primary-foreground"
+                                  className="rounded-sm bg-[#047857] px-3 py-1.5 text-[11px] font-black uppercase tracking-widest text-white"
                                 >
-                                  Save
+                                  SAVE
                                 </button>
                                 <button
                                   type="button"
                                   onClick={() => setEditingProductId(null)}
                                   disabled={isUpdatingPrice}
-                                  className="rounded-full bg-secondary px-3 py-1.5 text-xs font-bold text-muted-foreground"
+                                  className="rounded-sm border border-zinc-200 bg-[#F4F4F5] px-3 py-1.5 text-[11px] font-black uppercase tracking-widest text-[#71717A]"
                                 >
-                                  Cancel
+                                  ESC
                                 </button>
                               </div>
                             ) : (
-                              <div className="flex items-center justify-between border-t border-border/60 pt-2.5">
-                                <div className="flex items-center gap-2">
+                              <div className="flex items-center justify-between gap-2 border-t border-zinc-200 pt-2.5">
+                                <div className="flex items-center gap-1.5">
                                   <button
                                     type="button"
                                     onClick={() => {
                                       setEditingProduct(p)
                                       setIsModalOpen(true)
                                     }}
-                                    className="inline-flex items-center gap-1.5 rounded-full bg-primary/10 px-3.5 py-1.5 text-xs font-bold text-primary"
+                                    className="rounded-sm bg-[#09090B] px-3 py-1.5 text-[11px] font-black uppercase tracking-widest text-white hover:bg-zinc-800"
                                   >
-                                    <EditIcon className="h-3.5 w-3.5" />
-                                    <span>Edit Item</span>
+                                    EDIT
                                   </button>
                                   <button
                                     type="button"
                                     onClick={() => handleStartEditPrice(p)}
-                                    className="rounded-full bg-secondary px-3.5 py-1.5 text-xs font-bold text-foreground"
+                                    className="rounded-sm border border-zinc-200 bg-[#F4F4F5] px-3 py-1.5 text-[11px] font-black uppercase tracking-widest text-[#09090B] hover:bg-zinc-200"
                                   >
-                                    Change Price
+                                    PRICE
                                   </button>
                                 </div>
-
                                 <button
                                   type="button"
-                                  onClick={() =>
-                                    handleDeleteProduct(p.id, p.name)
-                                  }
-                                  className="flex h-8 w-8 items-center justify-center rounded-full bg-secondary text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive"
+                                  onClick={() => handleDeleteProduct(p.id, p.name)}
+                                  className="rounded-sm border border-zinc-200 px-2.5 py-1.5 text-[11px] font-black uppercase tracking-widest text-[#DC2626] hover:bg-red-50"
                                   aria-label={`Delete ${p.name}`}
                                 >
-                                  <TrashIcon className="h-4 w-4" />
+                                  DEL
                                 </button>
                               </div>
                             )}
-                          </div>
+                          </article>
                         )
-                      })
-                    ) : (
-                      <div className="rounded-3xl bg-card p-8 text-center shadow-sm ring-1 ring-border">
-                        <span className="mx-auto flex h-14 w-14 items-center justify-center rounded-full bg-secondary text-muted-foreground">
-                          <PackageIcon className="h-7 w-7" />
-                        </span>
-                        <p className="mt-3 text-base font-bold text-foreground">
-                          Your {storeType === 'grocery' ? 'shop catalog' : 'menu'} is empty
-                        </p>
-                        <p className="mx-auto mt-1 max-w-xs text-xs text-muted-foreground">
-                          Upload as a Restaurant Owner (meals) or Shop Owner (groceries & essentials) so nearby customers can order.
-                        </p>
-                        <div className="mt-4 flex flex-wrap items-center justify-center gap-2">
-                          <button
-                            type="button"
-                            onClick={() => {
-                              setEditingProduct(null)
-                              setUploadDefaultStoreType('restaurant')
-                              setIsModalOpen(true)
-                            }}
-                            className="inline-flex items-center gap-1.5 rounded-full bg-primary px-4 py-2.5 text-xs font-bold text-primary-foreground shadow-sm"
-                          >
-                            <PlusIcon className="h-4 w-4" />
-                            <span>Upload Restaurant Meal</span>
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => {
-                              setEditingProduct(null)
-                              setUploadDefaultStoreType('grocery')
-                              setIsModalOpen(true)
-                            }}
-                            className="inline-flex items-center gap-1.5 rounded-full bg-secondary px-4 py-2.5 text-xs font-bold text-foreground ring-1 ring-border"
-                          >
-                            <PlusIcon className="h-4 w-4" />
-                            <span>Upload Shop Product</span>
-                          </button>
-                        </div>
+                      })}
+                    </div>
+                  ) : (
+                    <div className="border border-zinc-200 bg-white rounded-md p-10 text-center">
+                      <p className="text-sm font-black uppercase tracking-widest text-[#09090B]">
+                        CATALOG EMPTY
+                      </p>
+                      <p className="mx-auto mt-1 max-w-md text-xs text-[#71717A]">
+                        Upload meals or shop inventory so nearby customers can place orders.
+                      </p>
+                      <div className="mt-4 flex flex-wrap items-center justify-center gap-2">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setEditingProduct(null)
+                            setUploadDefaultStoreType('restaurant')
+                            setIsModalOpen(true)
+                          }}
+                          className="rounded-sm bg-[#047857] px-4 py-2.5 text-xs font-black uppercase tracking-widest text-white"
+                        >
+                          + UPLOAD RESTAURANT MEAL
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setEditingProduct(null)
+                            setUploadDefaultStoreType('grocery')
+                            setIsModalOpen(true)
+                          }}
+                          className="rounded-sm border border-zinc-200 bg-[#F4F4F5] px-4 py-2.5 text-xs font-black uppercase tracking-widest text-[#09090B]"
+                        >
+                          + UPLOAD SHOP PRODUCT
+                        </button>
                       </div>
-                    )}
-                  </div>
+                    </div>
+                  )}
                 </div>
               )}
 
               {/* TAB 3: STORE DETAILS & SETTINGS */}
               {activeTab === 'store' && (
-                <div className="mt-5 px-5">
-                  <h2 className="text-lg font-extrabold tracking-tight text-foreground">
-                    Store Settings
-                  </h2>
-                  <p className="mt-0.5 text-xs text-muted-foreground">
-                    Configure your business type and real-time GPS address so nearby customers see your store first.
-                  </p>
-
-                  <form
-                    onSubmit={handleSaveStoreSettings}
-                    className="mt-4 flex flex-col gap-4 rounded-3xl bg-card p-5 shadow-sm ring-1 ring-border"
-                  >
-                    {/* Business Type Selector */}
-                    <div className="flex flex-col gap-1.5">
-                      <label className="text-xs font-bold text-foreground">
-                        Business Type
-                      </label>
-                      <div className="grid grid-cols-2 gap-2.5">
-                        <button
-                          type="button"
-                          onClick={() => setNewStoreType('restaurant')}
-                          className={cn(
-                            'flex flex-col items-start gap-1 rounded-2xl border p-3.5 text-left transition-all',
-                            newStoreType === 'restaurant'
-                              ? 'border-primary bg-primary/10 ring-1 ring-primary'
-                              : 'border-border bg-background hover:bg-secondary/50',
-                          )}
-                        >
-                          <StoreIcon className="h-5 w-5 text-primary" />
-                          <span className="text-xs font-extrabold text-foreground">
-                            Restaurant Owner
-                          </span>
-                          <span className="text-[11px] text-muted-foreground">
-                            Meals, Burgers, Kotas & Takeaways
-                          </span>
-                        </button>
-
-                        <button
-                          type="button"
-                          onClick={() => setNewStoreType('grocery')}
-                          className={cn(
-                            'flex flex-col items-start gap-1 rounded-2xl border p-3.5 text-left transition-all',
-                            newStoreType === 'grocery'
-                              ? 'border-primary bg-primary/10 ring-1 ring-primary'
-                              : 'border-border bg-background hover:bg-secondary/50',
-                          )}
-                        >
-                          <BagIcon className="h-5 w-5 text-primary" />
-                          <span className="text-xs font-extrabold text-foreground">
-                            Shop / Grocery Owner
-                          </span>
-                          <span className="text-[11px] text-muted-foreground">
-                            Groceries, Spaza, Butcher & Produce
-                          </span>
-                        </button>
+                <div className="p-4 sm:p-6">
+                  <div className="grid grid-cols-1 gap-4 lg:grid-cols-12">
+                    {/* Left Form Column */}
+                    <form
+                      onSubmit={handleSaveStoreSettings}
+                      className="lg:col-span-7 flex flex-col gap-4 border border-zinc-200 bg-white rounded-md p-5"
+                    >
+                      <div className="border-b border-zinc-200 pb-3">
+                        <p className="text-[10px] font-bold uppercase tracking-widest text-[#71717A]">
+                          STORE CONFIGURATION
+                        </p>
+                        <h2 className="mt-0.5 text-lg font-black text-[#09090B]">
+                          BUSINESS PROFILE & VERIFIED GPS
+                        </h2>
                       </div>
-                    </div>
 
-                    <div className="flex flex-col gap-1.5">
-                      <label className="text-xs font-bold text-foreground">
-                        {newStoreType === 'grocery'
-                          ? 'Shop / Supermarket Name'
-                          : 'Restaurant Name'}
-                      </label>
-                      <input
-                        type="text"
-                        required
-                        value={newStoreName}
-                        onChange={(e) => setNewStoreName(e.target.value)}
-                        placeholder={
-                          newStoreType === 'grocery'
-                            ? 'e.g. Doornfontein Spaza & Fresh Mart'
-                            : 'e.g. SML Restaurant & Grill'
-                        }
-                        className="w-full rounded-2xl border bg-background px-4 py-3 text-sm outline-none focus:border-primary focus:ring-1 focus:ring-primary"
-                      />
-                    </div>
+                      {/* Business Type Selector */}
+                      <div className="flex flex-col gap-1.5">
+                        <label className="text-[10px] font-bold uppercase tracking-widest text-[#71717A]">
+                          BUSINESS TYPE
+                        </label>
+                        <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                          <button
+                            type="button"
+                            onClick={() => setNewStoreType('restaurant')}
+                            className={cn(
+                              'flex flex-col items-start gap-1 rounded-sm border p-3.5 text-left transition-colors',
+                              newStoreType === 'restaurant'
+                                ? 'border-[#09090B] bg-[#09090B] text-white'
+                                : 'border-zinc-200 bg-[#F4F4F5] text-[#09090B] hover:bg-zinc-200/70'
+                            )}
+                          >
+                            <span className="text-xs font-black uppercase tracking-widest">
+                              RESTAURANT OWNER
+                            </span>
+                            <span
+                              className={cn(
+                                'text-[11px]',
+                                newStoreType === 'restaurant' ? 'text-zinc-300' : 'text-[#71717A]'
+                              )}
+                            >
+                              Meals, Burgers, Kotas & Takeaways
+                            </span>
+                          </button>
 
-                    {/* Real-Time Store Street Address & GPS Coordinates */}
-                    <div className="flex flex-col gap-1.5">
-                      <label className="text-xs font-bold text-foreground">
-                        Store Street Address & GPS Location
-                      </label>
-                      <input
-                        type="text"
-                        value={newStoreLocation}
-                        onChange={(e) => {
-                          setNewStoreLocation(e.target.value)
-                          setStoreAddressQuery(e.target.value)
-                        }}
-                        placeholder="Search your store street address or suburb..."
-                        className="w-full rounded-2xl border bg-background px-4 py-3 text-sm outline-none focus:border-primary focus:ring-1 focus:ring-primary"
-                      />
+                          <button
+                            type="button"
+                            onClick={() => setNewStoreType('grocery')}
+                            className={cn(
+                              'flex flex-col items-start gap-1 rounded-sm border p-3.5 text-left transition-colors',
+                              newStoreType === 'grocery'
+                                ? 'border-[#09090B] bg-[#09090B] text-white'
+                                : 'border-zinc-200 bg-[#F4F4F5] text-[#09090B] hover:bg-zinc-200/70'
+                            )}
+                          >
+                            <span className="text-xs font-black uppercase tracking-widest">
+                              SHOP / GROCERY OWNER
+                            </span>
+                            <span
+                              className={cn(
+                                'text-[11px]',
+                                newStoreType === 'grocery' ? 'text-zinc-300' : 'text-[#71717A]'
+                              )}
+                            >
+                              Groceries, Spaza, Butcher & Produce
+                            </span>
+                          </button>
+                        </div>
+                      </div>
 
-                      {storeAddressQuery.trim().length >= 1 && (
-                        <div className="mt-1 flex max-h-48 flex-col overflow-y-auto rounded-2xl border border-border bg-background p-1 shadow-md">
-                          {isSearchingStoreAddress && storeAddressResults.length === 0 ? (
-                            <p className="py-3 text-center text-xs text-muted-foreground">
-                              Searching addresses...
-                            </p>
-                          ) : storeAddressResults.length === 0 ? (
-                            <p className="py-3 text-center text-xs text-muted-foreground">
-                              No matching address found.
-                            </p>
-                          ) : (
-                            storeAddressResults.map((loc, idx) => (
-                              <button
-                                key={`${loc.label}-${idx}`}
-                                type="button"
-                                onClick={() => {
-                                  setNewStoreLocation(loc.label)
-                                  setNewStoreCoords(loc.coords)
-                                  setStoreAddressQuery('')
-                                  setStoreAddressResults([])
-                                }}
-                                className="flex w-full items-start gap-2 rounded-xl p-2.5 text-left hover:bg-secondary"
-                              >
-                                <PinIcon className="mt-0.5 h-4 w-4 shrink-0 text-primary" />
-                                <div className="min-w-0 flex-1">
-                                  <span className="block truncate text-xs font-bold text-foreground">
-                                    {loc.label}
-                                  </span>
-                                  <span className="block truncate text-[11px] text-muted-foreground">
-                                    {loc.address}
-                                  </span>
-                                </div>
-                              </button>
-                            ))
+                      <div className="flex flex-col gap-1.5">
+                        <label className="text-[10px] font-bold uppercase tracking-widest text-[#71717A]">
+                          {newStoreType === 'grocery' ? 'SHOP / SUPERMARKET NAME' : 'RESTAURANT NAME'}
+                        </label>
+                        <input
+                          type="text"
+                          required
+                          value={newStoreName}
+                          onChange={(e) => setNewStoreName(e.target.value)}
+                          placeholder={
+                            newStoreType === 'grocery'
+                              ? 'e.g. Doornfontein Spaza & Fresh Mart'
+                              : 'e.g. SML Restaurant & Grill'
+                          }
+                          className="w-full rounded-sm border border-zinc-200 bg-[#F4F4F5] px-3.5 py-2.5 text-sm font-bold text-[#09090B] outline-none focus:border-[#09090B] focus:bg-white"
+                        />
+                      </div>
+
+                      {/* Real-Time Store Street Address & GPS Coordinates */}
+                      <div className="flex flex-col gap-1.5">
+                        <label className="text-[10px] font-bold uppercase tracking-widest text-[#71717A]">
+                          STORE STREET ADDRESS & GPS LOCATION
+                        </label>
+                        <div className="flex items-center gap-2 rounded-sm border border-zinc-200 bg-[#F4F4F5] px-3 py-2 focus-within:border-[#09090B] focus-within:bg-white">
+                          <input
+                            type="text"
+                            value={newStoreLocation}
+                            onChange={(e) => {
+                              setNewStoreLocation(e.target.value)
+                              setStoreAddressQuery(e.target.value)
+                            }}
+                            onKeyDown={(e) => {
+                              if (e.key === 'Enter' && storeAddressQuery.trim().length >= 1) {
+                                e.preventDefault()
+                                handleManualStoreAddressSubmit()
+                              }
+                            }}
+                            placeholder="Enter street address, suburb, or city..."
+                            className="w-full bg-transparent text-sm font-medium text-[#09090B] outline-none placeholder:text-[#71717A]"
+                          />
+                          {isSearchingStoreAddress && (
+                            <span className="shrink-0 text-[10px] font-black uppercase tracking-widest text-[#1D4ED8]">
+                              ...
+                            </span>
+                          )}
+                          {newStoreLocation && (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setNewStoreLocation('')
+                                setStoreAddressQuery('')
+                                setStoreAddressResults([])
+                              }}
+                              className="shrink-0 rounded-sm border border-zinc-200 bg-white px-2 py-1 text-[10px] font-black uppercase tracking-widest text-[#71717A] hover:text-[#09090B]"
+                            >
+                              CLR
+                            </button>
+                          )}
+                          {storeAddressQuery.trim().length >= 2 && (
+                            <button
+                              type="button"
+                              onClick={handleManualStoreAddressSubmit}
+                              className="shrink-0 rounded-sm bg-[#09090B] px-3 py-1 text-[10px] font-black uppercase tracking-widest text-white"
+                            >
+                              SET
+                            </button>
                           )}
                         </div>
-                      )}
+
+                        {correctedStoreQueryHint && (
+                          <p className="text-[11px] font-medium text-[#71717A]">
+                            Auto-matched to{' '}
+                            <span className="font-bold text-[#047857] capitalize">
+                              {correctedStoreQueryHint}
+                            </span>
+                          </p>
+                        )}
+
+                        {storeAddressQuery.trim().length >= 1 && (
+                          <div className="max-h-60 overflow-y-auto rounded-sm border border-zinc-200 bg-white divide-y divide-zinc-200">
+                            {isSearchingStoreAddress && storeAddressResults.length === 0 ? (
+                              <p className="py-4 text-center text-xs font-bold uppercase tracking-widest text-[#71717A]">
+                                SEARCHING SOUTH AFRICA...
+                              </p>
+                            ) : storeAddressResults.length === 0 ? (
+                              <p className="py-4 text-center text-xs text-[#71717A]">
+                                No matching address found. Enter street name or suburb.
+                              </p>
+                            ) : (
+                              storeAddressResults.map((loc, idx) => (
+                                <button
+                                  key={`${loc.label}-${idx}`}
+                                  type="button"
+                                  onClick={() => handleSelectStoreLocation(loc)}
+                                  className="flex w-full items-start gap-2.5 px-3 py-2.5 text-left hover:bg-[#F4F4F5]"
+                                >
+                                  <span className="mt-1 h-2 w-2 shrink-0 rounded-full bg-[#047857]" />
+                                  <div className="min-w-0 flex-1">
+                                    <span className="block truncate text-xs font-bold text-[#09090B]">
+                                      {loc.label}
+                                    </span>
+                                    <span className="block truncate text-[11px] text-[#71717A]">
+                                      {loc.address}
+                                    </span>
+                                  </div>
+                                </button>
+                              ))
+                            )}
+                          </div>
+                        )}
+
+                        <button
+                          type="button"
+                          onClick={handleUseStoreGpsLocation}
+                          disabled={isLocatingStoreGps}
+                          className="mt-1 w-full rounded-sm border border-zinc-200 bg-[#F4F4F5] px-4 py-2.5 text-xs font-black uppercase tracking-widest text-[#09090B] hover:bg-zinc-200 disabled:opacity-50"
+                        >
+                          {isLocatingStoreGps
+                            ? 'DETECTING HARDWARE GPS...'
+                            : 'USE MY CURRENT GPS LOCATION'}
+                        </button>
+                      </div>
+
+                      <div className="flex flex-col gap-1.5">
+                        <label className="text-[10px] font-bold uppercase tracking-widest text-[#71717A]">
+                          ESTIMATED PREP TIME
+                        </label>
+                        <input
+                          type="text"
+                          value={newStorePickupTime}
+                          onChange={(e) => setNewStorePickupTime(e.target.value)}
+                          placeholder="e.g. 15-25 min"
+                          className="w-full rounded-sm border border-zinc-200 bg-[#F4F4F5] px-3.5 py-2.5 text-sm font-bold text-[#09090B] outline-none focus:border-[#09090B] focus:bg-white"
+                        />
+                      </div>
 
                       <button
-                        type="button"
-                        onClick={handleUseStoreGpsLocation}
-                        disabled={isLocatingStoreGps}
-                        className="mt-1 inline-flex items-center justify-center gap-2 rounded-2xl bg-primary/10 px-3.5 py-2.5 text-xs font-bold text-primary transition-colors hover:bg-primary/15"
+                        type="submit"
+                        disabled={isSavingStore || !newStoreName.trim()}
+                        className="mt-1 w-full rounded-sm bg-[#047857] py-3 text-xs font-black uppercase tracking-widest text-white transition-colors hover:bg-[#065F46] disabled:opacity-50"
                       >
-                        <PinIcon className="h-3.5 w-3.5" />
-                        <span>
-                          {isLocatingStoreGps
-                            ? 'Detecting store GPS...'
-                            : 'Use my current GPS location for store'}
-                        </span>
+                        {savedStoreSuccess
+                          ? 'STORE SETTINGS SAVED'
+                          : isSavingStore
+                            ? 'SAVING...'
+                            : 'SAVE STORE SETTINGS'}
                       </button>
+                    </form>
 
-                      {newStoreCoords && (
-                        <p className="text-[11px] font-semibold text-primary">
-                          GPS pinned ({newStoreCoords.lat.toFixed(4)}, {newStoreCoords.lng.toFixed(4)}) · Customers within {SERVICE_DELIVERY_RADIUS_KM} km will see your store prioritized by distance.
+                    {/* Right Telemetry / Verification Panel */}
+                    <aside className="lg:col-span-5 flex flex-col gap-4">
+                      <div className="border border-zinc-200 bg-white rounded-md p-5 space-y-3">
+                        <p className="text-[10px] font-bold uppercase tracking-widest text-[#71717A]">
+                          GEOSPATIAL DISPATCH STATUS
                         </p>
-                      )}
-                    </div>
-
-                    <div className="flex flex-col gap-1.5">
-                      <label className="text-xs font-bold text-foreground">
-                        Estimated Prep Time
-                      </label>
-                      <input
-                        type="text"
-                        value={newStorePickupTime}
-                        onChange={(e) => setNewStorePickupTime(e.target.value)}
-                        placeholder="e.g. 15-25 min"
-                        className="w-full rounded-2xl border bg-background px-4 py-3 text-sm outline-none focus:border-primary focus:ring-1 focus:ring-primary"
-                      />
-                    </div>
-
-                    <button
-                      type="submit"
-                      disabled={isSavingStore || !newStoreName.trim()}
-                      className="mt-2 flex w-full items-center justify-center gap-2 rounded-full bg-primary py-3.5 text-sm font-bold text-primary-foreground shadow-sm transition-transform active:scale-95 disabled:opacity-50"
-                    >
-                      {savedStoreSuccess ? (
-                        <>
-                          <CheckIcon className="h-4 w-4" />
-                          <span>Store Settings Saved</span>
-                        </>
-                      ) : isSavingStore ? (
-                        <span>Saving...</span>
-                      ) : (
-                        <span>Save Store Settings</span>
-                      )}
-                    </button>
-                  </form>
+                        <div className="bg-[#09090B] text-white rounded-sm p-3.5">
+                          <span className="block text-[10px] font-bold uppercase tracking-widest text-zinc-400">
+                            PINNED COORDINATES
+                          </span>
+                          <span className="mt-1 block text-base font-black tracking-wider [font-variant-numeric:tabular-nums]">
+                            {newStoreCoords
+                              ? `${newStoreCoords.lat.toFixed(5)}, ${newStoreCoords.lng.toFixed(5)}`
+                              : 'NOT PINNED'}
+                          </span>
+                        </div>
+                        <div className="grid grid-cols-2 gap-2.5">
+                          <div className="border border-zinc-200 bg-[#F4F4F5] rounded-sm p-3">
+                            <span className="block text-[10px] font-bold uppercase tracking-widest text-[#71717A]">
+                              DISPATCH RADIUS
+                            </span>
+                            <span className="text-lg font-black text-[#09090B] [font-variant-numeric:tabular-nums]">
+                              {SERVICE_DELIVERY_RADIUS_KM} KM
+                            </span>
+                          </div>
+                          <div className="border border-zinc-200 bg-[#F4F4F5] rounded-sm p-3">
+                            <span className="block text-[10px] font-bold uppercase tracking-widest text-[#71717A]">
+                              STORE STATUS
+                            </span>
+                            <span
+                              className={cn(
+                                'text-sm font-black uppercase tracking-widest',
+                                isPaused ? 'text-[#DC2626]' : 'text-[#047857]'
+                              )}
+                            >
+                              {isPaused ? 'PAUSED' : 'ONLINE'}
+                            </span>
+                          </div>
+                        </div>
+                        <p className="text-xs text-[#71717A]">
+                          Customers within {SERVICE_DELIVERY_RADIUS_KM} km see your store ranked by real road distance.
+                        </p>
+                      </div>
+                    </aside>
+                  </div>
                 </div>
               )}
 
               {/* TAB 4: ACCOUNT */}
               {activeTab === 'account' && (
-                <div className="mt-5 px-5">
-                  <div className="flex flex-col items-center rounded-3xl bg-card p-6 text-center shadow-sm ring-1 ring-border">
-                    <div className="flex h-20 w-20 items-center justify-center rounded-full bg-primary/10 text-2xl font-extrabold text-primary">
-                      {merchantName.slice(0, 2).toUpperCase()}
-                    </div>
-                    <h2 className="mt-3 text-lg font-extrabold text-foreground">
-                      {merchantName}
-                    </h2>
-                    <p className="text-xs text-muted-foreground">
-                      {currentUser?.email}
-                    </p>
-                    <span className="mt-2.5 inline-flex items-center gap-1.5 rounded-full bg-primary/10 px-3 py-1 text-xs font-bold text-primary">
-                      <StoreIcon className="h-3.5 w-3.5" />
-                      <span>Verified {storeTypeLabel}</span>
-                    </span>
-                  </div>
+                <div className="p-4 sm:p-6">
+                  <div className="mx-auto max-w-3xl space-y-4">
+                    <div className="flex flex-col items-start justify-between gap-4 border border-zinc-200 bg-white rounded-md p-5 sm:flex-row sm:items-center">
+                      <div className="flex items-center gap-4">
+                        <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-sm bg-[#09090B] text-xl font-black text-white">
+                          {merchantName.slice(0, 2).toUpperCase()}
+                        </div>
+                        <div>
+                          <p className="text-[10px] font-bold uppercase tracking-widest text-[#047857]">
+                            VERIFIED {storeTypeLabel.toUpperCase()}
+                          </p>
+                          <h2 className="text-lg font-black text-[#09090B]">
+                            {merchantName}
+                          </h2>
+                          <p className="text-xs font-medium text-[#71717A]">
+                            {currentUser?.email}
+                          </p>
+                        </div>
+                      </div>
 
-                  <div className="mt-4 flex flex-col gap-3">
-                    <button
-                      type="button"
-                      onClick={() => setActiveTab('store')}
-                      className="flex w-full items-center gap-3 rounded-2xl bg-card p-4 text-left shadow-sm ring-1 ring-border"
-                    >
-                      <span className="flex h-10 w-10 items-center justify-center rounded-full bg-primary/10 text-primary">
-                        <PinIcon className="h-5 w-5" />
-                      </span>
-                      <div className="min-w-0 flex-1">
-                        <span className="block text-sm font-bold text-foreground">
+                      <button
+                        type="button"
+                        onClick={handleSignOut}
+                        className="w-full sm:w-auto rounded-sm border border-[#DC2626] bg-white px-4 py-2.5 text-xs font-black uppercase tracking-widest text-[#DC2626] hover:bg-red-50"
+                      >
+                        SIGN OUT
+                      </button>
+                    </div>
+
+                    <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                      <button
+                        type="button"
+                        onClick={() => setActiveTab('store')}
+                        className="flex flex-col items-start gap-1 border border-zinc-200 bg-white rounded-md p-4 text-left hover:bg-[#F4F4F5]"
+                      >
+                        <span className="text-[10px] font-bold uppercase tracking-widest text-[#71717A]">
+                          LOCATION & CONFIG
+                        </span>
+                        <span className="text-sm font-black text-[#09090B]">
                           Store Type & GPS Address
                         </span>
-                        <span className="block truncate text-xs text-muted-foreground">
-                          {storeTypeLabel} · {storeLocation}
+                        <span className="truncate w-full text-xs text-[#71717A]">
+                          {storeLocation}
                         </span>
-                      </div>
-                    </button>
+                      </button>
 
-                    <button
-                      type="button"
-                      onClick={() => setActiveTab('products')}
-                      className="flex w-full items-center gap-3 rounded-2xl bg-card p-4 text-left shadow-sm ring-1 ring-border"
-                    >
-                      <span className="flex h-10 w-10 items-center justify-center rounded-full bg-primary/10 text-primary">
-                        <PackageIcon className="h-5 w-5" />
-                      </span>
-                      <div className="min-w-0 flex-1">
-                        <span className="block text-sm font-bold text-foreground">
+                      <button
+                        type="button"
+                        onClick={() => setActiveTab('products')}
+                        className="flex flex-col items-start gap-1 border border-zinc-200 bg-white rounded-md p-4 text-left hover:bg-[#F4F4F5]"
+                      >
+                        <span className="text-[10px] font-bold uppercase tracking-widest text-[#71717A]">
+                          INVENTORY
+                        </span>
+                        <span className="text-sm font-black text-[#09090B]">
                           Manage Menu Catalog
                         </span>
-                        <span className="block text-xs text-muted-foreground">
-                          {allProducts.length} active product
-                          {allProducts.length === 1 ? '' : 's'}
+                        <span className="text-xs text-[#71717A] [font-variant-numeric:tabular-nums]">
+                          {allProducts.length} active product{allProducts.length === 1 ? '' : 's'}
                         </span>
-                      </div>
-                    </button>
-
-                    <button
-                      type="button"
-                      onClick={handleSignOut}
-                      className="mt-2 flex w-full items-center gap-3 rounded-2xl border border-destructive/20 bg-destructive/5 p-4 text-left font-bold text-destructive"
-                    >
-                      <span className="flex h-10 w-10 items-center justify-center rounded-full bg-destructive/10">
-                        <LogOutIcon className="h-5 w-5" />
-                      </span>
-                      <span className="text-sm">Sign out</span>
-                    </button>
+                      </button>
+                    </div>
                   </div>
                 </div>
               )}
             </main>
 
-            {/* Bottom Navigation Bar (matches Student BottomNav) */}
-            <nav className="border-t border-border bg-card/95 backdrop-blur">
-              <ul className="mx-auto flex max-w-md items-stretch justify-between px-2 pb-6 pt-2">
-                <li className="flex-1">
-                  <button
-                    type="button"
-                    onClick={() => setActiveTab('orders')}
-                    className={cn(
-                      'relative flex w-full flex-col items-center gap-1 rounded-xl py-1.5 text-[11px] font-medium transition-colors',
-                      activeTab === 'orders'
-                        ? 'text-primary'
-                        : 'text-muted-foreground',
-                    )}
-                  >
-                    <span className="relative">
-                      <ReceiptIcon className="h-6 w-6" />
-                      {activeOrdersCount > 0 && (
-                        <span className="absolute -right-2 -top-1.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-accent px-1 text-[10px] font-bold text-accent-foreground">
-                          {activeOrdersCount}
-                        </span>
-                      )}
-                    </span>
-                    Orders
-                  </button>
-                </li>
-
-                <li className="flex-1">
-                  <button
-                    type="button"
-                    onClick={() => setActiveTab('products')}
-                    className={cn(
-                      'relative flex w-full flex-col items-center gap-1 rounded-xl py-1.5 text-[11px] font-medium transition-colors',
-                      activeTab === 'products'
-                        ? 'text-primary'
-                        : 'text-muted-foreground',
-                    )}
-                  >
-                    <PackageIcon className="h-6 w-6" />
-                    Menu
-                  </button>
-                </li>
-
-                <li className="flex-1">
-                  <button
-                    type="button"
-                    onClick={() => setActiveTab('store')}
-                    className={cn(
-                      'relative flex w-full flex-col items-center gap-1 rounded-xl py-1.5 text-[11px] font-medium transition-colors',
-                      activeTab === 'store'
-                        ? 'text-primary'
-                        : 'text-muted-foreground',
-                    )}
-                  >
-                    <StoreIcon className="h-6 w-6" />
-                    Store
-                  </button>
-                </li>
-
-                <li className="flex-1">
-                  <button
-                    type="button"
-                    onClick={() => setActiveTab('account')}
-                    className={cn(
-                      'relative flex w-full flex-col items-center gap-1 rounded-xl py-1.5 text-[11px] font-medium transition-colors',
-                      activeTab === 'account'
-                        ? 'text-primary'
-                        : 'text-muted-foreground',
-                    )}
-                  >
-                    <UserIcon className="h-6 w-6" />
-                    Account
-                  </button>
-                </li>
+            {/* Mobile-Only Bottom Navigation Bar (Desktop uses top header tabs) */}
+            <nav
+              className="fixed bottom-0 left-0 right-0 z-30 border-t border-zinc-200 bg-white md:hidden"
+              aria-label="Mobile Navigation"
+            >
+              <ul className="grid grid-cols-4">
+                {(
+                  [
+                    { id: 'orders', label: 'ORDERS', count: activeOrdersCount },
+                    { id: 'products', label: 'MENU', count: null },
+                    { id: 'store', label: 'STORE', count: null },
+                    { id: 'account', label: 'ACCOUNT', count: null },
+                  ] as const
+                ).map((item) => {
+                  const active = activeTab === item.id
+                  return (
+                    <li key={item.id}>
+                      <button
+                        type="button"
+                        onClick={() => setActiveTab(item.id)}
+                        className={cn(
+                          'flex w-full items-center justify-center gap-1.5 border-t-2 py-3.5 text-[11px] font-black uppercase tracking-widest transition-colors',
+                          active
+                            ? 'border-[#09090B] bg-[#F4F4F5] text-[#09090B]'
+                            : 'border-transparent text-[#71717A]'
+                        )}
+                      >
+                        <span>{item.label}</span>
+                        {item.count !== null && item.count > 0 && (
+                          <span className="rounded-sm bg-[#DC2626] px-1.5 py-0.5 text-[10px] font-black text-white [font-variant-numeric:tabular-nums]">
+                            {item.count}
+                          </span>
+                        )}
+                      </button>
+                    </li>
+                  )
+                })}
               </ul>
             </nav>
 

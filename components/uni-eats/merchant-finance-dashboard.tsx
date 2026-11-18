@@ -136,7 +136,7 @@ export function MerchantFinanceDashboard({
   }
 
   return (
-    <section className="space-y-4">
+    <section className="space-y-4 font-sans">
       {/* 0% Onboarding & In-Store Price Promise Banner */}
       <div className="rounded-2xl border border-[#287d46]/25 bg-[#287d46]/8 p-4">
         <div className="flex flex-wrap items-center justify-between gap-2">
@@ -204,7 +204,7 @@ export function MerchantFinanceDashboard({
           type="button"
           onClick={handleValidatePrice}
           disabled={!pricePromiseAccepted}
-          className="mt-2 rounded-lg bg-[#287d46] px-3 py-1.5 text-xs font-bold text-white disabled:opacity-50"
+          className="mt-2.5 rounded-full bg-[#287d46] px-5 py-2.5 text-[13.5px] font-bold text-white shadow-xs transition-colors hover:bg-[#216639] disabled:opacity-50"
         >
           Verify In-Store Price
         </button>
@@ -230,9 +230,9 @@ export function MerchantFinanceDashboard({
             type="button"
             onClick={() => setSubTab(key)}
             className={cn(
-              'rounded-full py-2 text-xs font-bold transition-colors',
+              'rounded-full py-2.5 text-[13.5px] font-bold transition-colors',
               subTab === key
-                ? 'bg-[#287d46] text-white'
+                ? 'bg-[#287d46] text-white shadow-xs'
                 : 'text-[#545454] hover:text-[#111111]'
             )}
           >
@@ -341,7 +341,7 @@ export function MerchantFinanceDashboard({
                     <button
                       type="button"
                       onClick={() => handleVerifyOrderPin(order)}
-                      className="rounded-lg bg-[#287d46] px-3.5 py-1.5 text-xs font-bold text-white"
+                      className="rounded-full bg-[#287d46] px-5 py-2.5 text-[13.5px] font-bold text-white shadow-xs transition-colors hover:bg-[#216639]"
                     >
                       Verify Pickup
                     </button>
@@ -387,10 +387,10 @@ export function MerchantFinanceDashboard({
               onToggleSponsoredTop3?.(next)
             }}
             className={cn(
-              'mt-4 w-full rounded-full py-3 text-xs font-extrabold transition-colors',
+              'mt-4 w-full rounded-full py-3.5 text-sm font-bold transition-colors',
               top3Sponsored
                 ? 'bg-[#F3F3F3] text-[#111111]'
-                : 'bg-[#287d46] text-white'
+                : 'bg-[#287d46] text-white hover:bg-[#216639]'
             )}
           >
             {top3Sponsored

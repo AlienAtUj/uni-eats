@@ -3,9 +3,11 @@
 import { useEffect, useMemo, useState } from 'react'
 import { restaurants as initialRestaurants } from '@/lib/data'
 import { formatZar } from '@/lib/dash-engine'
+import { formatJohannesburgTime } from '@/lib/coord-validation'
 import { geocodeStoreAddress, resolveStoreCoords, type Coordinates } from '@/lib/location'
 import { useStore } from './store'
 import { OrderTrackingMap } from './order-tracking-map'
+import { BottomSheet } from './sheet'
 import {
   CheckIcon,
   ClockIcon,
@@ -25,7 +27,8 @@ import {
 const stages = [
   { key: 'pending', title: 'Order confirmed', desc: 'The store received your order.' },
   { key: 'preparing', title: 'Preparing your order', desc: 'Your order is being freshly prepared.' },
-  { key: 'ready', title: 'Out for delivery', desc: 'Your rider is on the way with your order.' },
+  { key: 'ready', title: 'Ready', desc: 'Your order is ready and waiting for the rider.' },
+  { key: 'out_for_delivery', title: 'Out for delivery', desc: 'Your rider is on the way with your order.' },
   { key: 'completed', title: 'Delivered', desc: 'Enjoy your order. Great times!' },
 ]
 
@@ -33,17 +36,19 @@ const statusToIndex: Record<string, number> = {
   pending: 0,
   preparing: 1,
   ready: 2,
-  completed: 3,
+  out_for_delivery: 3,
+  completed: 4,
 }
 
 export function TrackingScreen() {
-  const { placedOrder, userLocation, user, goHome } = useStore()
+  const { placedOrder, userLocation, user, goHome, openRestaurant } = useStore()
   const { restaurants: fbRestaurants } = useFirebaseRestaurants()
   const [customerOrders, setCustomerOrders] = useState<Order[]>([])
   const [ordersTab, setOrdersTab] = useState<'active' | 'past'>('active')
   const [selectedOrderId, setSelectedOrderId] = useState<string | null>(null)
   const [isUpdatingStatus, setIsUpdatingStatus] = useState(false)
   const [isCancelling, setIsCancelling] = useState(false)
+  const [cancelConfirmOpen, setCancelConfirmOpen] = useState(false)
   const [cancelError, setCancelError] = useState<string | null>(null)
   const [geocodedShopCoords, setGeocodedShopCoords] = useState<Coordinates | null>(null)
 
@@ -67,7 +72,11 @@ export function TrackingScreen() {
   const activeOrders = useMemo(
     () =>
       customerOrders.filter(
-        (o) => o.status === 'pending' || o.status === 'preparing' || o.status === 'ready'
+        (o) =>
+          o.status === 'pending' ||
+          o.status === 'preparing' ||
+          o.status === 'ready' ||
+          o.status === 'out_for_delivery'
       ),
     [customerOrders]
   )
@@ -106,6 +115,9 @@ export function TrackingScreen() {
         status: trackedLiveOrder.status,
         paymentStatus: trackedLiveOrder.paymentStatus,
         deliveryOtp: trackedLiveOrder.deliveryOtp,
+        driverName: trackedLiveOrder.driverName,
+        driverPhone: trackedLiveOrder.driverPhone,
+        driverVehiclePlate: trackedLiveOrder.driverVehiclePlate,
         lines: trackedLiveOrder.items.map((it, idx) => ({
           lineId: `${it.id}-${idx}`,
           name: it.name,
@@ -133,6 +145,9 @@ export function TrackingScreen() {
         status: placedOrder.status || 'pending',
         paymentStatus: placedOrder.paymentStatus,
         deliveryOtp: placedOrder.deliveryOtp,
+        driverName: undefined as string | undefined,
+        driverPhone: undefined as string | undefined,
+        driverVehiclePlate: undefined as string | undefined,
         lines: placedOrder.lines,
       }
     }
@@ -144,8 +159,11 @@ export function TrackingScreen() {
     : 0
 
   const customerCoords = useMemo(
-    () => userLocation?.coords ?? { lat: -26.2041, lng: 28.0473 },
-    [userLocation]
+    () =>
+      trackedLiveOrder?.dropoffCoords ??
+      placedOrder?.dropoffCoords ??
+      userLocation?.coords ?? { lat: -26.2041, lng: 28.0473 },
+    [trackedLiveOrder?.dropoffCoords, placedOrder?.dropoffCoords, userLocation]
   )
 
   const orderStore = useMemo(() => {
@@ -173,27 +191,106 @@ export function TrackingScreen() {
   }, [orderStore])
 
   const shopCoords = useMemo<Coordinates>(() => {
+    if (trackedLiveOrder?.pickupCoords) return trackedLiveOrder.pickupCoords
+    if (placedOrder?.pickupCoords) return placedOrder.pickupCoords
     if (orderStore?.coords) return orderStore.coords
     if (geocodedShopCoords) return geocodedShopCoords
-    if (orderStore) return resolveStoreCoords(orderStore)
-    return {
-      lat: customerCoords.lat + 0.014,
-      lng: customerCoords.lng - 0.012,
+    if (orderStore) {
+      try {
+        return resolveStoreCoords(orderStore)
+      } catch {
+        // Store has no verified coords yet
+      }
     }
-  }, [orderStore, geocodedShopCoords, customerCoords])
+    return {
+      lat: Number.NaN,
+      lng: Number.NaN,
+    }
+  }, [trackedLiveOrder?.pickupCoords, placedOrder?.pickupCoords, orderStore, geocodedShopCoords])
 
   const nearbyShops = useMemo(
     () =>
       restaurants
         .filter((r) => r.id !== orderStore?.id)
         .slice(0, 8)
-        .map((r) => ({
-          id: r.id,
-          name: r.name,
-          coords: r.coords ?? resolveStoreCoords(r),
-        })),
+        .flatMap((r) => {
+          try {
+            return [{
+              id: r.id,
+              name: r.name,
+              coords: r.coords ?? resolveStoreCoords(r),
+            }]
+          } catch {
+            return []
+          }
+        }),
     [restaurants, orderStore?.id]
   )
+
+  const [etaMinutes, setEtaMinutes] = useState<number | null>(null)
+  const [etaRecalculating, setEtaRecalculating] = useState(false)
+
+  useEffect(() => {
+    if (!activeOrderDisplay || activeOrderDisplay.status === 'completed' || activeOrderDisplay.status === 'cancelled') {
+      setEtaMinutes(null)
+      setEtaRecalculating(false)
+      return
+    }
+    const origin =
+      trackedLiveOrder?.driverLocation &&
+      Number.isFinite(trackedLiveOrder.driverLocation.lat) &&
+      Number.isFinite(trackedLiveOrder.driverLocation.lng)
+        ? { lat: trackedLiveOrder.driverLocation.lat, lng: trackedLiveOrder.driverLocation.lng }
+        : shopCoords
+    if (
+      !origin ||
+      !customerCoords ||
+      !Number.isFinite(origin.lat) ||
+      !Number.isFinite(origin.lng) ||
+      !Number.isFinite(customerCoords.lat) ||
+      !Number.isFinite(customerCoords.lng)
+    ) {
+      return
+    }
+
+    let cancelled = false
+    fetch('/api/directions', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ origin, destination: customerCoords }),
+    })
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data) => {
+        if (cancelled) return
+        const sec = typeof data?.durationSeconds === 'number' ? data.durationSeconds : null
+        if (sec !== null && Number.isFinite(sec)) {
+          setEtaMinutes(Math.max(1, Math.round(sec / 60)))
+          setEtaRecalculating(false)
+        } else {
+          setEtaMinutes(null)
+          setEtaRecalculating(true)
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setEtaMinutes(null)
+          setEtaRecalculating(true)
+        }
+      })
+
+    return () => {
+      cancelled = true
+    }
+  }, [
+    activeOrderDisplay?.id,
+    activeOrderDisplay?.status,
+    trackedLiveOrder?.driverLocation?.lat,
+    trackedLiveOrder?.driverLocation?.lng,
+    shopCoords.lat,
+    shopCoords.lng,
+    customerCoords.lat,
+    customerCoords.lng,
+  ])
 
   const handleMarkCollected = async () => {
     if (!activeOrderDisplay?.firestoreId) return
@@ -213,6 +310,7 @@ export function TrackingScreen() {
     setIsCancelling(true)
     try {
       await cancelCustomerOrder(activeOrderDisplay.firestoreId)
+      setCancelConfirmOpen(false)
     } catch (err: any) {
       setCancelError(err?.message || 'Could not cancel order.')
     } finally {
@@ -294,46 +392,123 @@ export function TrackingScreen() {
             </p>
           </div>
         ) : (
-          <div className="space-y-3 px-5 pt-4">
+          <div className="space-y-4 px-5 pb-6 pt-4">
             {pastOrders.map((ord) => {
               const isCancelled = ord.status === 'cancelled'
+              const matchedStore =
+                restaurants.find((r) => r.id === ord.merchantId) ||
+                restaurants.find((r) => r.name === ord.merchantName)
+              const createdMs =
+                ord.createdAt?.toMillis?.() ||
+                (typeof ord.createdAt === 'number' ? ord.createdAt : null)
+              const formattedDate = createdMs ? formatJohannesburgTime(createdMs) : ''
+              const items = Array.isArray(ord.items) ? ord.items : []
+              const totalQty = items.reduce((s, it) => s + Number(it.quantity || 1), 0)
+
               return (
-                <div
+                <article
                   key={ord.id}
-                  className="rounded-2xl bg-white p-4 ring-1 ring-[#E8E8E8]"
+                  className="rounded-2xl bg-white p-5 ring-1 ring-[#E8E8E8]"
                 >
-                  <div className="flex items-start justify-between gap-2">
-                    <div className="min-w-0">
-                      <p className="text-[11px] font-bold uppercase tracking-wider text-[#545454]">
+                  {/* Top Row: Store Thumbnail + Store Name + Date/Order ID + Status */}
+                  <div className="flex items-start gap-3.5">
+                    <div className="flex h-14 w-14 shrink-0 items-center justify-center overflow-hidden rounded-xl bg-[#F3F3F3] ring-1 ring-[#E8E8E8]">
+                      {matchedStore?.image ? (
+                        <img
+                          src={matchedStore.image}
+                          alt={ord.merchantName}
+                          className="h-full w-full object-cover"
+                        />
+                      ) : (
+                        <span className="text-base font-extrabold text-[#287d46]">
+                          {(ord.merchantName || 'D').slice(0, 2).toUpperCase()}
+                        </span>
+                      )}
+                    </div>
+
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-start justify-between gap-2">
+                        <h3 className="truncate text-base font-extrabold text-[#111111]">
+                          {ord.merchantName}
+                        </h3>
+                        <span
+                          className={cn(
+                            'shrink-0 rounded-full px-2.5 py-0.5 text-[11px] font-bold',
+                            isCancelled
+                              ? 'bg-[#e23b2e]/12 text-[#e23b2e]'
+                              : 'bg-[#287d46]/12 text-[#287d46]'
+                          )}
+                        >
+                          {isCancelled ? 'Cancelled' : 'Completed'}
+                        </span>
+                      </div>
+                      <p className="mt-0.5 text-xs font-medium text-[#545454]">
+                        {totalQty} item{totalQty === 1 ? '' : 's'} · {formatZar(Number(ord.total || 0))}
+                      </p>
+                      <p className="mt-0.5 text-[11px] font-medium text-[#545454]">
+                        {formattedDate ? `${formattedDate} · ` : ''}
                         {ord.orderId || ord.id.slice(0, 8)}
                       </p>
-                      <h3 className="truncate text-sm font-extrabold text-[#111111]">
-                        {ord.merchantName}
-                      </h3>
                     </div>
-                    <span
-                      className={cn(
-                        'shrink-0 rounded-full px-2.5 py-0.5 text-[11px] font-bold',
-                        isCancelled
-                          ? 'bg-[#e23b2e]/12 text-[#e23b2e]'
-                          : 'bg-[#287d46]/12 text-[#287d46]'
-                      )}
-                    >
-                      {isCancelled ? 'Cancelled' : 'Completed'}
-                    </span>
                   </div>
-                  <p className="mt-1.5 line-clamp-2 text-xs text-[#545454]">
-                    {ord.items.map((it) => `${it.quantity}× ${it.name}`).join(', ')}
-                  </p>
-                  <div className="mt-2.5 flex items-center justify-between border-t border-[#E8E8E8] pt-2.5 text-xs">
-                    <span className="font-medium text-[#545454]">
-                      {ord.paymentStatus === 'paid' ? 'Paid online' : 'Cash on Pickup'}
-                    </span>
-                    <span className="text-sm font-extrabold text-[#111111]">
-                      {formatZar(Number(ord.total || 0))}
-                    </span>
+
+                  {/* Itemized Breakdown */}
+                  <div className="mt-4 space-y-2 border-t border-[#E8E8E8] pt-3.5">
+                    {items.slice(0, 3).map((it, idx) => (
+                      <div
+                        key={`${it.id || idx}-${idx}`}
+                        className="flex items-center justify-between gap-3 text-xs"
+                      >
+                        <div className="flex min-w-0 items-center gap-2">
+                          <span className="flex h-5 min-w-5 shrink-0 items-center justify-center rounded-md bg-[#F3F3F3] px-1.5 text-[11px] font-bold text-[#111111]">
+                            {it.quantity}
+                          </span>
+                          <span className="truncate font-medium text-[#111111]">
+                            {it.name}
+                          </span>
+                        </div>
+                        <span className="shrink-0 font-semibold text-[#545454]">
+                          {formatZar(Number(it.price || 0) * Number(it.quantity || 1))}
+                        </span>
+                      </div>
+                    ))}
+                    {items.length > 3 && (
+                      <p className="text-[11px] font-semibold text-[#545454]">
+                        +{items.length - 3} more item{items.length - 3 === 1 ? '' : 's'}
+                      </p>
+                    )}
                   </div>
-                </div>
+
+                  {/* Footer: Payment Info + Reorder CTA */}
+                  <div className="mt-4 flex items-center justify-between gap-3 border-t border-[#E8E8E8] pt-3.5">
+                    <div>
+                      <span className="block text-[11px] font-medium text-[#545454]">
+                        {ord.paymentStatus === 'paid' ? 'Paid online' : 'Cash on Pickup'}
+                      </span>
+                      <span className="text-sm font-extrabold text-[#111111]">
+                        {formatZar(Number(ord.total || 0))}
+                      </span>
+                    </div>
+
+                    {matchedStore ? (
+                      <button
+                        type="button"
+                        onClick={() => openRestaurant(matchedStore.id)}
+                        className="rounded-full bg-[#287d46] px-5 py-2.5 text-xs font-bold text-white transition-colors hover:bg-[#216639] active:scale-95"
+                      >
+                        Reorder
+                      </button>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={goHome}
+                        className="rounded-full bg-[#F3F3F3] px-4 py-2 text-xs font-bold text-[#111111]"
+                      >
+                        Browse stores
+                      </button>
+                    )}
+                  </div>
+                </article>
               )
             })}
           </div>
@@ -376,8 +551,8 @@ export function TrackingScreen() {
               {stages[current].desc}
             </p>
 
-            {/* Uber Eats-style 4-segment green progress bar */}
-            <div className="mt-4 grid grid-cols-4 gap-1.5">
+            {/* Uber Eats-style 5-segment green progress bar */}
+            <div className="mt-4 grid grid-cols-5 gap-1.5">
               {stages.map((s, idx) => (
                 <span
                   key={s.key}
@@ -408,6 +583,7 @@ export function TrackingScreen() {
           {/* Real-time Uber Eats-style Color Tracking Map */}
           <OrderTrackingMap
             orderId={activeOrderDisplay.id}
+            firestoreOrderId={activeOrderDisplay.firestoreId}
             shopName={activeOrderDisplay.restaurantName}
             shopCoords={shopCoords}
             customerCoords={customerCoords}
@@ -417,20 +593,59 @@ export function TrackingScreen() {
 
           {/* Progress tracker */}
           <div className="-mt-4 relative z-10 rounded-t-3xl bg-white px-5 pt-6">
+            {/* Live Traffic-Aware ETA (LOC-009) */}
+            {activeOrderDisplay.status !== 'completed' && activeOrderDisplay.status !== 'cancelled' && (
+              <div className="mb-4 flex items-center justify-between rounded-2xl bg-[#F3F3F3] px-4 py-2.5">
+                <span className="text-xs font-semibold text-[#545454]">Estimated arrival</span>
+                <span className="text-xs font-extrabold text-[#111111]">
+                  {etaMinutes !== null
+                    ? `Arriving in ${etaMinutes} min`
+                    : etaRecalculating
+                      ? 'Arriving soon — recalculating'
+                      : 'Calculating ETA…'}
+                </span>
+              </div>
+            )}
+
             {/* Secure Handover 4-Digit Delivery OTP */}
             {activeOrderDisplay.deliveryOtp && (
-              <div className="mb-5 flex items-center justify-between rounded-2xl border border-[#287d46]/25 bg-[#287d46]/8 px-4 py-3">
+              <div className="mb-4 flex items-center justify-between rounded-2xl border border-[#287d46]/25 bg-[#287d46]/8 px-4 py-3">
                 <div>
                   <p className="text-[11px] font-bold uppercase tracking-wider text-[#287d46]">
-                    Secure Handover OTP
+                    Your Delivery PIN
                   </p>
                   <p className="text-xs font-medium text-[#545454]">
-                    Share this 4-digit PIN with your rider at delivery
+                    Give this 4-digit PIN to your driver when they arrive
                   </p>
                 </div>
                 <span className="rounded-xl bg-[#287d46] px-3.5 py-2 font-mono text-lg font-black tracking-[0.25em] text-white shadow-xs">
                   {activeOrderDisplay.deliveryOtp}
                 </span>
+              </div>
+            )}
+
+            {/* Assigned Driver Details */}
+            {activeOrderDisplay.driverName && (
+              <div className="mb-5 flex items-center justify-between rounded-2xl bg-[#F3F3F3] px-4 py-3">
+                <div>
+                  <p className="text-[11px] font-bold uppercase tracking-wider text-[#545454]">
+                    Your Driver
+                  </p>
+                  <p className="text-sm font-extrabold text-[#111111]">
+                    {activeOrderDisplay.driverName}
+                    {activeOrderDisplay.driverVehiclePlate
+                      ? ` • ${activeOrderDisplay.driverVehiclePlate}`
+                      : ''}
+                  </p>
+                </div>
+                {activeOrderDisplay.driverPhone && (
+                  <a
+                    href={`tel:${activeOrderDisplay.driverPhone}`}
+                    className="rounded-full bg-white px-3.5 py-2 text-xs font-bold text-[#287d46] ring-1 ring-[#E8E8E8]"
+                  >
+                    Call
+                  </a>
+                )}
               </div>
             )}
 
@@ -492,17 +707,20 @@ export function TrackingScreen() {
               )}
               <button
                 type="button"
-                onClick={handleCancelOrder}
+                onClick={() => {
+                  setCancelError(null)
+                  setCancelConfirmOpen(true)
+                }}
                 disabled={isCancelling}
-                className="w-full rounded-full border border-[#e23b2e]/40 bg-[#e23b2e]/8 px-6 py-3 text-sm font-bold text-[#e23b2e] transition-colors hover:bg-[#e23b2e]/15 disabled:opacity-50"
+                className="w-full rounded-full border border-[#e23b2e]/40 bg-[#e23b2e]/8 px-6 py-3.5 text-[15px] font-bold text-[#e23b2e] transition-colors hover:bg-[#e23b2e]/15 disabled:opacity-50"
               >
                 {isCancelling ? 'Cancelling order...' : 'Cancel Order'}
               </button>
             </div>
           )}
 
-          {/* Out for delivery / Delivered action banners */}
-          {current === 2 && (
+          {/* Ready / Out for delivery / Delivered action banners */}
+          {current === 3 && (
             <div className="mt-3 px-5">
               <div className="rounded-2xl border-2 border-emerald-500/40 bg-emerald-500/10 p-4 text-center">
                 <CheckIcon className="mx-auto h-6 w-6 text-emerald-600" />
@@ -522,7 +740,7 @@ export function TrackingScreen() {
             </div>
           )}
 
-          {current === 3 && (
+          {current === 4 && (
             <div className="mt-3 px-5">
               <div className="rounded-2xl bg-emerald-500/10 p-4 text-center">
                 <CheckIcon className="mx-auto h-6 w-6 text-emerald-600" />
@@ -598,6 +816,44 @@ export function TrackingScreen() {
           </div>
         </>
       )}
+
+      {/* Cancel Order Confirmation Sheet */}
+      <BottomSheet
+        open={cancelConfirmOpen}
+        onClose={() => !isCancelling && setCancelConfirmOpen(false)}
+        title="Cancel this order?"
+      >
+        <div className="space-y-4">
+          <p className="text-sm font-medium text-[#545454]">
+            Are you sure you want to cancel order{' '}
+            <span className="font-bold text-[#111111]">
+              {activeOrderDisplay?.id}
+            </span>
+            ? This cannot be undone once cancelled.
+          </p>
+          {cancelError && (
+            <p className="text-xs font-bold text-destructive">{cancelError}</p>
+          )}
+          <div className="flex flex-col gap-2.5">
+            <button
+              type="button"
+              onClick={handleCancelOrder}
+              disabled={isCancelling}
+              className="w-full rounded-full bg-[#e23b2e] px-6 py-3.5 text-[15px] font-bold text-white transition-colors hover:bg-[#c82d22] disabled:opacity-50"
+            >
+              {isCancelling ? 'Cancelling order...' : 'Yes, Cancel Order'}
+            </button>
+            <button
+              type="button"
+              onClick={() => setCancelConfirmOpen(false)}
+              disabled={isCancelling}
+              className="w-full rounded-full bg-[#F3F3F3] px-6 py-3.5 text-[15px] font-bold text-[#111111] transition-colors hover:bg-[#E8E8E8] disabled:opacity-50"
+            >
+              Keep Order
+            </button>
+          </div>
+        </div>
+      </BottomSheet>
     </div>
   )
 }

@@ -1,3 +1,6 @@
+import { isValidSACoord, StoreCoordinatesMissingError } from './coord-validation.ts'
+export { isValidSACoord, StoreCoordinatesMissingError }
+
 /**
  * Dash Real-Time Location & Delivery Engine
  * Multi-provider geocoding & autocomplete (ArcGIS World Geocoder ZAF + Komoot Photon + Nominatim)
@@ -381,18 +384,17 @@ export function resolveStoreCoords(store: {
 }): Coordinates {
   if (
     store.coords &&
-    typeof store.coords.lat === 'number' &&
-    typeof store.coords.lng === 'number' &&
-    Number.isFinite(store.coords.lat) &&
-    Number.isFinite(store.coords.lng) &&
-    store.coords.lat !== 0
+    isValidSACoord(store.coords.lat, store.coords.lng)
   ) {
     return store.coords
   }
 
   const key = (store.location || '').trim().toLowerCase()
   if (key && storeGeocodeCache.has(key)) {
-    return storeGeocodeCache.get(key)!
+    const cached = storeGeocodeCache.get(key)!
+    if (isValidSACoord(cached.lat, cached.lng)) {
+      return cached
+    }
   }
 
   if (typeof window !== 'undefined' && key) {
@@ -400,7 +402,7 @@ export function resolveStoreCoords(store: {
       const cached = localStorage.getItem(`dash_geo_${key}`)
       if (cached) {
         const parsed = JSON.parse(cached)
-        if (parsed && Number.isFinite(parsed.lat) && Number.isFinite(parsed.lng)) {
+        if (parsed && isValidSACoord(parsed.lat, parsed.lng)) {
           storeGeocodeCache.set(key, parsed)
           return parsed
         }
@@ -411,11 +413,11 @@ export function resolveStoreCoords(store: {
   }
 
   const instant = searchInstantLocations(`${store.location || ''} ${store.name || ''}`)
-  if (instant.length > 0) {
+  if (instant.length > 0 && isValidSACoord(instant[0].coords.lat, instant[0].coords.lng)) {
     return instant[0].coords
   }
 
-  return { lat: -26.1969, lng: 28.0583 }
+  throw new StoreCoordinatesMissingError(store.name)
 }
 
 /**
@@ -857,7 +859,7 @@ export async function detectAccurateUserLocation(): Promise<DeliveryLocation | n
         const location = await reverseGeocodeCoords(fix.lat, fix.lng)
         location.accuracy = fix.accuracy
         location.isGps = true
-        location.isApproximate = fix.accuracy > 300
+        location.isApproximate = fix.accuracy > 50
         resolve(location)
       } catch {
         resolve({
@@ -865,7 +867,7 @@ export async function detectAccurateUserLocation(): Promise<DeliveryLocation | n
           coords: { lat: fix.lat, lng: fix.lng },
           isGps: true,
           accuracy: fix.accuracy,
-          isApproximate: fix.accuracy > 300,
+          isApproximate: fix.accuracy > 50,
         })
       }
     }
@@ -887,8 +889,8 @@ export async function detectAccurateUserLocation(): Promise<DeliveryLocation | n
               accuracy: acc,
             }
           }
-          // If true hardware GPS accuracy (<= 65 meters), finish immediately!
-          if (acc <= 65) {
+          // If true hardware GPS accuracy (<= 50 meters), finish immediately! (LOC-001)
+          if (acc <= 50) {
             clearTimeout(timeoutTimer)
             finish(bestFix)
           }
@@ -910,7 +912,7 @@ export async function detectAccurateUserLocation(): Promise<DeliveryLocation | n
               accuracy: acc,
             }
           }
-          if (acc <= 65) {
+          if (acc <= 50) {
             clearTimeout(timeoutTimer)
             finish(bestFix)
           }

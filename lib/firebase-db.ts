@@ -53,7 +53,13 @@ export type ProductDoc = {
   createdAt: number
 }
 
-export type OrderStatus = 'pending' | 'preparing' | 'ready' | 'completed' | 'cancelled'
+export type OrderStatus =
+  | 'pending'
+  | 'preparing'
+  | 'ready'
+  | 'out_for_delivery'
+  | 'completed'
+  | 'cancelled'
 
 export interface OrderItem {
   id: string
@@ -63,6 +69,14 @@ export interface OrderItem {
   modifiers?: Array<{ label: string; price: number }>
 }
 
+export interface DriverLocation {
+  lat: number
+  lng: number
+  heading: number
+  speedKmh?: number
+  updatedAt?: any
+}
+
 export interface Order {
   id: string
   orderId?: string
@@ -70,6 +84,13 @@ export interface Order {
   customerName: string
   merchantId: string
   merchantName: string
+  driverId?: string
+  driverName?: string
+  driverPhone?: string
+  driverVehiclePlate?: string
+  deliveryStatus?: string
+  driverLocation?: DriverLocation
+  lastValidDriverLocation?: DriverLocation
   items: OrderItem[]
   total: number
   status: OrderStatus
@@ -85,6 +106,10 @@ export interface Order {
   dashPlusApplied?: boolean
   batchDispatch?: boolean
   pickupVerified?: boolean
+  pickupAddress?: string
+  pickupCoords?: { lat: number; lng: number }
+  dropoffAddress?: string
+  dropoffCoords?: { lat: number; lng: number }
   createdAt: any
   updatedAt: any
   pickupTime?: string
@@ -685,7 +710,7 @@ export async function generateUniqueOrderOtp(excludeCodes: string[] = []): Promi
   try {
     const activeQuery = query(
       collection(db, 'orders'),
-      where('status', 'in', ['pending', 'preparing', 'ready'])
+      where('status', 'in', ['pending', 'preparing', 'ready', 'out_for_delivery'])
     )
     const snap = await getDocs(activeQuery)
     for (const d of snap.docs) {
@@ -756,7 +781,7 @@ export async function updateMerchantCompliance(
   )
 }
 
-/** Verify Rider Pickup PIN against the real order in Firestore */
+/** Verify Rider Pickup PIN against the real order in Firestore and mark Out for Delivery */
 export async function verifyOrderPickupPin(orderDocId: string, enteredPin: string) {
   const orderRef = doc(db, 'orders', orderDocId)
   const snap = await getDoc(orderRef)
@@ -765,10 +790,11 @@ export async function verifyOrderPickupPin(orderDocId: string, enteredPin: strin
   }
   const data = snap.data() as Partial<Order>
   if (!data.pickupPin || data.pickupPin !== enteredPin.trim()) {
-    throw new Error('Invalid Order PIN. Ask the rider for the 4-digit pickup PIN.')
+    throw new Error('Invalid Pickup PIN. Ask the driver for the 4-digit pickup PIN.')
   }
   await updateDoc(orderRef, {
     pickupVerified: true,
+    status: 'out_for_delivery',
     updatedAt: serverTimestamp(),
   })
 }
@@ -840,7 +866,11 @@ export async function getCustomerOrders(customerId: string): Promise<Order[]> {
 }
 
 /** Subscribe to live updates for all orders of a customer */
-export function subscribeToCustomerOrders(customerId: string, callback: (orders: Order[]) => void) {
+export function subscribeToCustomerOrders(
+  customerId: string,
+  callback: (orders: Order[]) => void,
+  onError?: (error: unknown) => void
+) {
   const ordersRef = collection(db, 'orders')
   const q = query(ordersRef, where('customerId', '==', customerId))
   return onSnapshot(
@@ -861,6 +891,7 @@ export function subscribeToCustomerOrders(customerId: string, callback: (orders:
       if (error?.code !== 'permission-denied') {
         console.warn('Customer orders subscription notice:', error)
       }
+      onError?.(error)
     }
   )
 }
@@ -888,7 +919,12 @@ export async function cancelCustomerOrder(orderId: string) {
     throw new Error('Order not found.')
   }
   const data = snap.data() as Partial<Order>
-  if (data.status === 'ready' || data.status === 'completed' || data.status === 'cancelled') {
+  if (
+    data.status === 'ready' ||
+    data.status === 'out_for_delivery' ||
+    data.status === 'completed' ||
+    data.status === 'cancelled'
+  ) {
     throw new Error('Order cannot be cancelled because it is already ready or finished.')
   }
   await updateDoc(orderRef, {
@@ -913,8 +949,15 @@ export async function getOrder(orderId: string): Promise<Order | null> {
   }
 }
 
+import { validateDriverGpsJump } from './coord-validation'
+export { validateDriverGpsJump }
+
 /** Subscribe to live updates for a single order */
-export function subscribeToOrder(orderId: string, callback: (order: Order | null) => void) {
+export function subscribeToOrder(
+  orderId: string,
+  callback: (order: Order | null) => void,
+  onError?: (error: unknown) => void
+) {
   const orderRef = doc(db, 'orders', orderId)
   return onSnapshot(
     orderRef,
@@ -929,6 +972,7 @@ export function subscribeToOrder(orderId: string, callback: (order: Order | null
       if (error?.code !== 'permission-denied') {
         console.warn('Order subscription notice:', error)
       }
+      onError?.(error)
       callback(null)
     }
   )

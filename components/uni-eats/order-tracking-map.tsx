@@ -2,6 +2,12 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { Coordinates } from '@/lib/location'
+import {
+  subscribeToOrder,
+  validateDriverGpsJump,
+  type DriverLocation,
+} from '@/lib/firebase-db'
+import { filterStationaryDrift } from '@/lib/coord-validation'
 import { cn } from '@/lib/utils'
 
 /**
@@ -88,10 +94,10 @@ export const UBER_EATS_COLOR_MAP_STYLE = [
 export const UBER_EATS_DARK_MAP_STYLE = UBER_EATS_COLOR_MAP_STYLE
 
 export const UBER_EATS_FIT_BOUNDS_PADDING = {
-  top: 100,
-  bottom: 200,
-  left: 50,
-  right: 50,
+  top: 44,
+  bottom: 56,
+  left: 40,
+  right: 40,
 }
 
 export interface DriverTelemetry {
@@ -345,6 +351,7 @@ function loadGoogleMapsApi(apiKey: string): Promise<any> {
 
 export function OrderTrackingMap({
   orderId,
+  firestoreOrderId,
   shopName,
   shopCoords,
   customerCoords,
@@ -352,6 +359,7 @@ export function OrderTrackingMap({
   orderStage,
 }: {
   orderId: string
+  firestoreOrderId?: string
   shopName: string
   shopCoords: Coordinates
   customerCoords: Coordinates
@@ -371,7 +379,12 @@ export function OrderTrackingMap({
   const [isFollowing, setIsFollowing] = useState(true)
   const [mapReady, setMapReady] = useState(false)
   const [mapError, setMapError] = useState<string | null>(null)
-  const [connectionMode, setConnectionMode] = useState<'websocket' | 'live-sim'>('live-sim')
+  const [hasLiveDriverLocation, setHasLiveDriverLocation] = useState(false)
+  const [connectionMode, setConnectionMode] = useState<'firestore' | 'websocket'>('firestore')
+  const [subscriptionReconnecting, setSubscriptionReconnecting] = useState(false)
+  const [gpsSilenceSeconds, setGpsSilenceSeconds] = useState(0)
+  const lastValidFirestoreLocRef = useRef<DriverLocation | null>(null)
+  const lastGpsFixAtRef = useRef<number>(Date.now())
 
   const isFollowingRef = useRef(true)
   useEffect(() => {
@@ -395,22 +408,53 @@ export function OrderTrackingMap({
     rafId: 0,
   })
 
+  const shopLat = shopCoords.lat
+  const shopLng = shopCoords.lng
+  const custLat = customerCoords.lat
+  const custLng = customerCoords.lng
+  const coordsValid =
+    Number.isFinite(shopLat) &&
+    Number.isFinite(shopLng) &&
+    Number.isFinite(custLat) &&
+    Number.isFinite(custLng)
+  const routeKey = coordsValid
+    ? `${shopLat.toFixed(5)},${shopLng.toFixed(5)}->${custLat.toFixed(5)},${custLng.toFixed(5)}`
+    : 'invalid'
+  const lastFetchedRouteKeyRef = useRef<string>('')
+
   const fitAllBounds = useCallback(() => {
     const map = mapRef.current
     const gmaps = (window as any).google?.maps
-    if (!map || !gmaps) return
+    if (!map || !gmaps || !coordsValid) return
 
     const bounds = new gmaps.LatLngBounds()
-    routePathRef.current.forEach((pt) => bounds.extend(pt))
-    bounds.extend(shopCoords)
-    bounds.extend(customerCoords)
-    bounds.extend({
-      lat: animStateRef.current.currentLat,
-      lng: animStateRef.current.currentLng,
+    routePathRef.current.forEach((pt) => {
+      if (Number.isFinite(pt?.lat) && Number.isFinite(pt?.lng)) {
+        bounds.extend(pt)
+      }
     })
+    bounds.extend({ lat: shopLat, lng: shopLng })
+    bounds.extend({ lat: custLat, lng: custLng })
+    if (
+      hasLiveDriverLocation &&
+      Number.isFinite(animStateRef.current.currentLat) &&
+      Number.isFinite(animStateRef.current.currentLng)
+    ) {
+      bounds.extend({
+        lat: animStateRef.current.currentLat,
+        lng: animStateRef.current.currentLng,
+      })
+    }
 
+    if (typeof bounds.isEmpty === 'function' && bounds.isEmpty()) return
     map.fitBounds(bounds, UBER_EATS_FIT_BOUNDS_PADDING)
-  }, [shopCoords, customerCoords])
+    gmaps.event.addListenerOnce(map, 'idle', () => {
+      const z = map.getZoom()
+      if (typeof z === 'number' && z > 17) {
+        map.setZoom(17)
+      }
+    })
+  }, [shopLat, shopLng, custLat, custLng, coordsValid, hasLiveDriverLocation])
 
   const handleRecenter = () => {
     setIsFollowing(true)
@@ -435,7 +479,7 @@ export function OrderTrackingMap({
     st.duration = 1000
   }, [])
 
-  // Initialize Google Map + Pre-rendered PNG Markers + Clustering
+  // 1. Initialize Google Map ONCE (prevents map recreation & straight-line glitch)
   useEffect(() => {
     const apiKey = process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY
     if (!apiKey) {
@@ -444,14 +488,30 @@ export function OrderTrackingMap({
     }
 
     let cancelled = false
+    const prevAuthFailure = (window as any).gm_authFailure
+    ;(window as any).gm_authFailure = () => {
+      if (!cancelled) {
+        setMapError('Live map unavailable (Google Maps authentication error). Order tracking continues below.')
+      }
+      if (typeof prevAuthFailure === 'function') {
+        prevAuthFailure()
+      }
+    }
 
     loadGoogleMapsApi(apiKey)
       .then((gmaps) => {
-        if (cancelled || !mapContainerRef.current) return
+        if (cancelled || !mapContainerRef.current || mapRef.current) return
         const sprites = getMarkerSprites()
 
+        const initialCenter =
+          Number.isFinite(shopLat) && Number.isFinite(shopLng)
+            ? { lat: shopLat, lng: shopLng }
+            : Number.isFinite(custLat) && Number.isFinite(custLng)
+              ? { lat: custLat, lng: custLng }
+              : { lat: -26.2041, lng: 28.0473 }
+
         const map = new gmaps.Map(mapContainerRef.current, {
-          center: shopCoords,
+          center: initialCenter,
           zoom: 14,
           styles: UBER_EATS_COLOR_MAP_STYLE,
           disableDefaultUI: true,
@@ -465,9 +525,9 @@ export function OrderTrackingMap({
           setIsFollowing(false)
         })
 
-        // Dual-layer Road Route Polyline (dark casing + vibrant Dash green)
+        // Dual-layer Road Route Polyline (initialized EMPTY — no straight-line flash)
         routeCasingRef.current = new gmaps.Polyline({
-          path: [shopCoords, customerCoords],
+          path: [],
           geodesic: false,
           strokeColor: '#0E2E19',
           strokeOpacity: 0.9,
@@ -476,7 +536,7 @@ export function OrderTrackingMap({
           map,
         })
         routePolylineRef.current = new gmaps.Polyline({
-          path: [shopCoords, customerCoords],
+          path: [],
           geodesic: false,
           strokeColor: '#287d46',
           strokeOpacity: 1,
@@ -485,31 +545,9 @@ export function OrderTrackingMap({
           map,
         })
 
-        // Fetch actual street-level driving directions via /api/directions (Routes API v2 + OSRM fallback)
-        fetch('/api/directions', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            origin: shopCoords,
-            destination: customerCoords,
-          }),
-        })
-          .then((res) => (res.ok ? res.json() : null))
-          .then((data) => {
-            if (cancelled || !Array.isArray(data?.path) || data.path.length < 2) return
-            const roadPath: Coordinates[] = data.path
-            routePathRef.current = roadPath
-            routeCasingRef.current?.setPath(roadPath)
-            routePolylineRef.current?.setPath(roadPath)
-            fitAllBounds()
-          })
-          .catch(() => {
-            // keep initial path on network failure
-          })
-
         // Customer Home Marker
         customerMarkerRef.current = new gmaps.Marker({
-          position: customerCoords,
+          position: { lat: custLat, lng: custLng },
           map,
           title: 'Delivery Address',
           zIndex: 50,
@@ -520,33 +558,28 @@ export function OrderTrackingMap({
           },
         })
 
-        // Primary Shop Marker + Optional Nearby Shop Markers for clustering
-        const allShops = [
-          { id: 'active-shop', name: shopName, coords: shopCoords },
-          ...nearbyShops,
+        // Primary Shop Marker
+        shopMarkersRef.current = [
+          new gmaps.Marker({
+            position: { lat: shopLat, lng: shopLng },
+            map,
+            title: shopName,
+            zIndex: 40,
+            icon: {
+              url: sprites.shopPng,
+              scaledSize: new gmaps.Size(38, 38),
+              anchor: new gmaps.Point(19, 34),
+            },
+          }),
         ]
-        shopMarkersRef.current = allShops.map(
-          (s) =>
-            new gmaps.Marker({
-              position: s.coords,
-              map,
-              title: s.name,
-              zIndex: 40,
-              icon: {
-                url: sprites.shopPng,
-                scaledSize: new gmaps.Size(38, 38),
-                anchor: new gmaps.Point(19, 34),
-              },
-            })
-        )
 
         // Cluster Marker for low zoom levels (zoom <= 13)
         clusterMarkerRef.current = new gmaps.Marker({
-          position: shopCoords,
+          position: { lat: shopLat, lng: shopLng },
           map: null,
           zIndex: 45,
           label: {
-            text: String(allShops.length),
+            text: '1',
             color: '#FFFFFF',
             fontWeight: 'bold',
             fontSize: '12px',
@@ -558,22 +591,22 @@ export function OrderTrackingMap({
           },
         })
 
-        // Shop clustering toggle on zoom_changed
         map.addListener('zoom_changed', () => {
           const z = map.getZoom() ?? 14
-          const showCluster = z <= 13 && allShops.length > 1
+          const totalShops = shopMarkersRef.current.length
+          const showCluster = z <= 13 && totalShops > 1
           shopMarkersRef.current.forEach((m) => m.setMap(showCluster ? null : map))
           clusterMarkerRef.current?.setMap(showCluster ? map : null)
         })
 
-        // Driver Car Marker (always on top via high zIndex: 999)
+        // Driver Car Marker (hidden until real driverLocation arrives, always on top via high zIndex: 999)
         const initialFrameIdx = Math.round(animStateRef.current.currentBearing / 5) % 72
         driverMarkerRef.current = new gmaps.Marker({
           position: {
             lat: animStateRef.current.currentLat,
             lng: animStateRef.current.currentLng,
           },
-          map,
+          map: null,
           title: 'Driver',
           zIndex: 999,
           optimized: false,
@@ -584,8 +617,6 @@ export function OrderTrackingMap({
           },
         })
 
-        // Initial fitBounds with UI padding
-        fitAllBounds()
         setMapReady(true)
       })
       .catch(() => {
@@ -595,7 +626,56 @@ export function OrderTrackingMap({
     return () => {
       cancelled = true
     }
-  }, [shopCoords, customerCoords, shopName, nearbyShops, fitAllBounds])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  const fitAllBoundsRef = useRef(fitAllBounds)
+  useEffect(() => {
+    fitAllBoundsRef.current = fitAllBounds
+  }, [fitAllBounds])
+
+  // 2. Update Shop/Customer Markers & Fetch Street Directions only when valid coordinates actually change
+  useEffect(() => {
+    if (!mapReady || !mapRef.current || !coordsValid) return
+
+    customerMarkerRef.current?.setPosition({ lat: custLat, lng: custLng })
+    if (shopMarkersRef.current[0]) {
+      shopMarkersRef.current[0].setPosition({ lat: shopLat, lng: shopLng })
+      shopMarkersRef.current[0].setTitle(shopName)
+    }
+    clusterMarkerRef.current?.setPosition({ lat: shopLat, lng: shopLng })
+
+    if (lastFetchedRouteKeyRef.current === routeKey) return
+
+    let cancelled = false
+    fetch('/api/directions', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        origin: { lat: shopLat, lng: shopLng },
+        destination: { lat: custLat, lng: custLng },
+      }),
+    })
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data) => {
+        if (cancelled || !Array.isArray(data?.path) || data.path.length < 2) return
+        lastFetchedRouteKeyRef.current = routeKey
+        const roadPath: Coordinates[] = data.path
+        routePathRef.current = roadPath
+        routeCasingRef.current?.setPath(roadPath)
+        routePolylineRef.current?.setPath(roadPath)
+        fitAllBoundsRef.current()
+      })
+      .catch(() => {
+        if (!cancelled) {
+          fitAllBoundsRef.current()
+        }
+      })
+
+    return () => {
+      cancelled = true
+    }
+  }, [mapReady, coordsValid, routeKey, shopLat, shopLng, custLat, custLng, shopName])
 
   // Smooth requestAnimationFrame Loop (1-second easeInOutCubic interpolation, no setTimeout)
   useEffect(() => {
@@ -644,76 +724,158 @@ export function OrderTrackingMap({
     }
   }, [mapReady])
 
-  // Real-Time WebSocket (Socket.IO / WebSocket) Driver Feed — throttled to 1 update/sec
+  // Show Driver Marker on map ONLY when real-time driverLocation has been received
+  useEffect(() => {
+    if (!mapReady || !driverMarkerRef.current || !mapRef.current) return
+    driverMarkerRef.current.setMap(hasLiveDriverLocation ? mapRef.current : null)
+  }, [mapReady, hasLiveDriverLocation])
+
+  // Track driver GPS silence duration for LOC-020 (45s waiting, 120s support link)
+  useEffect(() => {
+    if (!firestoreOrderId || orderStage < 2) {
+      setGpsSilenceSeconds(0)
+      return
+    }
+    lastGpsFixAtRef.current = Date.now()
+    const timer = setInterval(() => {
+      setGpsSilenceSeconds(Math.floor((Date.now() - lastGpsFixAtRef.current) / 1000))
+    }, 1000)
+    return () => clearInterval(timer)
+  }, [firestoreOrderId, orderStage])
+
+  // Real-Time Firestore onSnapshot Listener for Driver Location + Exponential Backoff Reconnect (LOC-021)
+  useEffect(() => {
+    if (!firestoreOrderId) return
+    let cancelled = false
+    let retryCount = 0
+    let retryTimer: ReturnType<typeof setTimeout> | null = null
+    let unsubscribe: (() => void) | null = null
+
+    const attach = () => {
+      if (cancelled) return
+      unsubscribe = subscribeToOrder(
+        firestoreOrderId,
+        (liveOrder) => {
+          retryCount = 0
+          setSubscriptionReconnecting(false)
+          const nextLoc = liveOrder?.driverLocation
+          if (!nextLoc) return
+
+          const check = validateDriverGpsJump(lastValidFirestoreLocRef.current, nextLoc, 120)
+          if (!check.valid) {
+            const speedLabel = Number.isFinite(check.impliedSpeedKmh)
+              ? check.impliedSpeedKmh.toFixed(1)
+              : 'unknown'
+            console.warn(`Rejected impossible driver GPS jump (${speedLabel} km/h)`)
+            return
+          }
+
+          const smoothed = filterStationaryDrift(
+            lastValidFirestoreLocRef.current,
+            { lat: nextLoc.lat, lng: nextLoc.lng },
+            check.impliedSpeedKmh
+          )
+          lastValidFirestoreLocRef.current = {
+            ...nextLoc,
+            lat: smoothed.lat,
+            lng: smoothed.lng,
+          }
+          lastGpsFixAtRef.current = Date.now()
+          setGpsSilenceSeconds(0)
+          setHasLiveDriverLocation(true)
+          setConnectionMode('firestore')
+          if (!smoothed.suppressed) {
+            pushDriverUpdate({
+              lat: smoothed.lat,
+              lng: smoothed.lng,
+              bearing: typeof nextLoc.heading === 'number' ? nextLoc.heading : 0,
+              timestamp: Date.now(),
+            })
+          }
+        },
+        () => {
+          if (cancelled) return
+          setSubscriptionReconnecting(true)
+          unsubscribe?.()
+          unsubscribe = null
+          const delayMs = Math.min(30000, 1000 * 2 ** retryCount)
+          retryCount += 1
+          retryTimer = setTimeout(attach, delayMs)
+        }
+      )
+    }
+
+    attach()
+    return () => {
+      cancelled = true
+      if (retryTimer) clearTimeout(retryTimer)
+      unsubscribe?.()
+    }
+  }, [firestoreOrderId, pushDriverUpdate])
+
+  // Optional Real-Time WebSocket (Socket.IO) Driver Feed (no mock simulation)
   useEffect(() => {
     const socketUrl = process.env.NEXT_PUBLIC_SOCKET_URL
-    if (socketUrl) {
-      const wsUrl = socketUrl.replace(/^http/, 'ws')
-      const ws = new WebSocket(`${wsUrl}/socket.io/?EIO=4&transport=websocket`)
-      setConnectionMode('websocket')
+    if (!socketUrl) return
 
-      ws.onopen = () => {
-        ws.send('40')
-        ws.send(`42${JSON.stringify(['join:order', { orderId }])}`)
-      }
+    const wsUrl = socketUrl.replace(/^http/, 'ws')
+    const ws = new WebSocket(`${wsUrl}/socket.io/?EIO=4&transport=websocket`)
+    setConnectionMode('websocket')
 
-      ws.onmessage = (event) => {
-        if (typeof event.data === 'string' && event.data.startsWith('42')) {
-          try {
-            const [eventName, payload] = JSON.parse(event.data.slice(2))
-            if (eventName === 'driver:location' && payload?.lat && payload?.lng) {
-              pushDriverUpdate({
-                lat: Number(payload.lat),
-                lng: Number(payload.lng),
-                bearing: Number(payload.bearing ?? 0),
-                timestamp: Date.now(),
-              })
-            }
-          } catch {
-            // ignore non-JSON frames
+    ws.onopen = () => {
+      ws.send('40')
+      ws.send(`42${JSON.stringify(['join:order', { orderId }])}`)
+    }
+
+    ws.onmessage = (event) => {
+      if (typeof event.data === 'string' && event.data.startsWith('42')) {
+        try {
+          const [eventName, payload] = JSON.parse(event.data.slice(2))
+          if (eventName === 'driver:location' && payload?.lat && payload?.lng) {
+            setHasLiveDriverLocation(true)
+            pushDriverUpdate({
+              lat: Number(payload.lat),
+              lng: Number(payload.lng),
+              bearing: Number(payload.bearing ?? 0),
+              timestamp: Date.now(),
+            })
           }
+        } catch {
+          // ignore non-JSON frames
         }
       }
-
-      return () => ws.close()
     }
 
-    // Fallback live 1Hz telemetry stream along route when no external Socket.IO server is configured
-    setConnectionMode('live-sim')
-    let lastEmit = 0
-    let rafSim = 0
-    const startMs = performance.now()
-    const totalTripMs = 45_000
-
-    const step = (now: number) => {
-      if (now - lastEmit >= 1000) {
-        lastEmit = now
-        const progressBase = orderStage >= 3 ? 1 : orderStage >= 2 ? 0.55 : 0.12
-        const cycle = ((now - startMs) % totalTripMs) / totalTripMs
-        const p = Math.min(1, Math.max(progressBase, cycle))
-        const sampled = sampleAlongRoute(routePathRef.current, p)
-
-        pushDriverUpdate({
-          lat: sampled.lat,
-          lng: sampled.lng,
-          bearing: sampled.bearing,
-          timestamp: Date.now(),
-        })
-      }
-      rafSim = requestAnimationFrame(step)
-    }
-
-    rafSim = requestAnimationFrame(step)
-    return () => cancelAnimationFrame(rafSim)
-  }, [orderId, shopCoords, customerCoords, orderStage, pushDriverUpdate])
+    return () => ws.close()
+  }, [orderId, pushDriverUpdate])
 
   return (
-    <div className="relative h-72 w-full overflow-hidden bg-[#F4F4F2]">
+    <div className="relative h-80 w-full overflow-hidden bg-[#F4F4F2]">
       <div ref={mapContainerRef} className="h-full w-full" />
 
       {mapError && (
         <div className="absolute inset-0 flex items-center justify-center bg-[#F4F4F2] p-4 text-center text-xs font-medium text-[#545454]">
           {mapError}
+        </div>
+      )}
+
+      {subscriptionReconnecting && !mapError && (
+        <div className="pointer-events-none absolute left-1/2 top-3 -translate-x-1/2 rounded-full bg-[#111111]/85 px-3 py-1 text-[11px] font-semibold text-white shadow">
+          Live tracking reconnecting…
+        </div>
+      )}
+
+      {!subscriptionReconnecting && !mapError && orderStage >= 2 && gpsSilenceSeconds >= 45 && (
+        <div className="absolute left-1/2 top-3 flex -translate-x-1/2 items-center gap-2 rounded-full bg-white/95 px-3.5 py-1.5 text-[11px] font-semibold text-[#111111] shadow ring-1 ring-black/10">
+          <span>Waiting for driver GPS signal…</span>
+          {gpsSilenceSeconds >= 120 && (
+            <a
+              href="mailto:support@dashapp.co.za?subject=Driver%20GPS%20Signal%20Issue"
+              className="font-bold text-[#287d46] underline"
+            >
+              Contact support
+            </a>
+          )}
         </div>
       )}
 

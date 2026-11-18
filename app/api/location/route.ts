@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { isValidSACoord } from '@/lib/coord-validation'
 
 // In-memory cache to prevent duplicate API calls and keep app costs near $0
 const locationApiCache = new Map<string, { data: any; expiry: number }>()
@@ -228,8 +229,8 @@ export async function GET(req: NextRequest) {
     if (action === 'reverse') {
       const lat = parseFloat(searchParams.get('lat') || '')
       const lng = parseFloat(searchParams.get('lng') || '')
-      if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
-        return NextResponse.json({ error: 'Invalid coordinates' }, { status: 400 })
+      if (!isValidSACoord(lat, lng)) {
+        return NextResponse.json({ error: 'INVALID_COORD', field: 'coords' }, { status: 400 })
       }
 
       // Round coordinates to ~11 meters to maximize cache hits and eliminate redundant billing

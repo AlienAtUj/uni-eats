@@ -1,9 +1,26 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { isValidSACoord } from '@/lib/coord-validation'
+import {
+  BoundedLruCache,
+  extractRetryAfterSeconds,
+  parseDurationSeconds,
+  routeCacheKey,
+} from '@/lib/route-cache'
 
 interface LatLng {
   lat: number
   lng: number
 }
+
+interface CachedDirectionsResult {
+  provider: string
+  path: LatLng[]
+  distanceMeters: number | null
+  duration: unknown
+  durationSeconds: number | null
+}
+
+const directionsCache = new BoundedLruCache<CachedDirectionsResult>(1000, 15 * 60 * 1000)
 
 /** Standard Google Encoded Polyline decoder */
 function decodePolyline(encoded: string): LatLng[] {
@@ -46,19 +63,23 @@ export async function POST(req: NextRequest) {
     const origin = body?.origin as LatLng | undefined
     const destination = body?.destination as LatLng | undefined
 
-    if (
-      !origin ||
-      !destination ||
-      !Number.isFinite(origin.lat) ||
-      !Number.isFinite(origin.lng) ||
-      !Number.isFinite(destination.lat) ||
-      !Number.isFinite(destination.lng)
-    ) {
-      return NextResponse.json({ error: 'Invalid origin or destination' }, { status: 400 })
+    if (!origin || !isValidSACoord(origin.lat, origin.lng)) {
+      return NextResponse.json({ error: 'INVALID_COORD', field: 'origin' }, { status: 400 })
+    }
+    if (!destination || !isValidSACoord(destination.lat, destination.lng)) {
+      return NextResponse.json({ error: 'INVALID_COORD', field: 'destination' }, { status: 400 })
+    }
+
+    const cacheKey = routeCacheKey('dir', origin, destination)
+    const cached = directionsCache.get(cacheKey)
+    if (cached) {
+      return NextResponse.json(cached)
     }
 
     const googleKey =
       process.env.GOOGLE_MAPS_API_KEY || process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY
+    const referer = req.headers.get('referer') || req.nextUrl.origin
+    let rateLimitedRetryAfter: number | undefined
 
     // 1. Try Google Maps Routes API (New)
     if (googleKey) {
@@ -72,7 +93,9 @@ export async function POST(req: NextRequest) {
               'X-Goog-Api-Key': googleKey,
               'X-Goog-FieldMask':
                 'routes.duration,routes.distanceMeters,routes.polyline.encodedPolyline',
+              Referer: referer,
             },
+            signal: AbortSignal.timeout(5000),
             body: JSON.stringify({
               origin: {
                 location: { latLng: { latitude: origin.lat, longitude: origin.lng } },
@@ -88,18 +111,24 @@ export async function POST(req: NextRequest) {
           }
         )
 
-        if (res.ok) {
+        if (res.status === 429) {
+          rateLimitedRetryAfter = extractRetryAfterSeconds(res)
+        } else if (res.ok) {
           const data = await res.json()
           const encoded = data?.routes?.[0]?.polyline?.encodedPolyline
           if (typeof encoded === 'string' && encoded.length > 0) {
             const path = decodePolyline(encoded)
             if (path.length >= 2) {
-              return NextResponse.json({
+              const duration = data.routes[0].duration ?? null
+              const result: CachedDirectionsResult = {
                 provider: 'google-routes-v2',
                 path,
                 distanceMeters: data.routes[0].distanceMeters ?? null,
-                duration: data.routes[0].duration ?? null,
-              })
+                duration,
+                durationSeconds: parseDurationSeconds(duration),
+              }
+              directionsCache.set(cacheKey, result)
+              return NextResponse.json(result)
             }
           }
         }
@@ -111,25 +140,38 @@ export async function POST(req: NextRequest) {
     // 2. Fallback to OSRM real street-level driving route
     const osrmUrl = `https://router.project-osrm.org/route/v1/driving/${origin.lng},${origin.lat};${destination.lng},${destination.lat}?overview=full&geometries=geojson`
     const osrmRes = await fetch(osrmUrl, { next: { revalidate: 0 } })
-    if (osrmRes.ok) {
+    if (osrmRes.status === 429) {
+      rateLimitedRetryAfter = extractRetryAfterSeconds(osrmRes)
+    } else if (osrmRes.ok) {
       const osrmData = await osrmRes.json()
       const coords: [number, number][] | undefined =
         osrmData?.routes?.[0]?.geometry?.coordinates
       if (Array.isArray(coords) && coords.length >= 2) {
         const path = coords.map(([lng, lat]) => ({ lat, lng }))
-        return NextResponse.json({
+        const duration = osrmData.routes[0].duration ?? null
+        const result: CachedDirectionsResult = {
           provider: 'osrm',
           path,
           distanceMeters: osrmData.routes[0].distance ?? null,
-          duration: osrmData.routes[0].duration ?? null,
-        })
+          duration,
+          durationSeconds: parseDurationSeconds(duration),
+        }
+        directionsCache.set(cacheKey, result)
+        return NextResponse.json(result)
       }
     }
 
-    return NextResponse.json({
-      provider: 'fallback',
-      path: [origin, destination],
-    })
+    if (rateLimitedRetryAfter !== undefined) {
+      return NextResponse.json(
+        { error: 'UPSTREAM_RATE_LIMITED', retryAfterSeconds: rateLimitedRetryAfter },
+        { status: 503, headers: { 'Retry-After': String(rateLimitedRetryAfter) } }
+      )
+    }
+
+    return NextResponse.json(
+      { error: 'Unable to compute driving route from routing APIs.' },
+      { status: 502 }
+    )
   } catch (err) {
     console.error('Directions API error:', err)
     return NextResponse.json({ error: 'Failed to compute route' }, { status: 500 })

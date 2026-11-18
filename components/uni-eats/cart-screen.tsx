@@ -218,7 +218,13 @@ function CartDetail({
 
   useEffect(() => {
     if (!userLocation?.coords || !restaurant) return
-    const shopCoords = resolveStoreCoords(restaurant)
+    let shopCoords
+    try {
+      shopCoords = resolveStoreCoords(restaurant)
+    } catch {
+      setRoadDistanceKm(null)
+      return
+    }
     let cancelled = false
     fetchRoadDistanceKm(shopCoords, userLocation.coords)
       .then((km) => {

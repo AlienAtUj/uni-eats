@@ -6,6 +6,7 @@ import {
   useMemo,
   useState,
   useEffect,
+  useRef,
   type ReactNode,
 } from 'react'
 import { campuses, type Restaurant } from '@/lib/data'
@@ -20,7 +21,8 @@ import {
   calculateDeliveryFee,
   calculateDeliveryTime,
 } from '@/lib/location'
-import { generateDeliveryOtp, DASH_SERVICE_FEE_ZAR, getDeliveryFeeByRoadDistance, formatZar } from '@/lib/dash-engine'
+import { generateDeliveryOtp, DASH_SERVICE_FEE_ZAR, getDeliveryFeeByRoadDistance, formatZar, fetchBatchRoadDistancesKm } from '@/lib/dash-engine'
+import { isValidPlacedOrder } from '@/lib/coord-validation'
 import { onAuthStateChanged, signOut as firebaseSignOut, type User } from 'firebase/auth'
 import { auth } from '@/lib/firebase'
 import { fetchUserRole, type UserRole } from '@/lib/firebase-auth'
@@ -70,7 +72,7 @@ type Store = {
   recentLocations: DeliveryLocation[]
   isLocatingGps: boolean
   locationError: string | null
-  detectUserLocation: () => Promise<DeliveryLocation | null>
+  detectUserLocation: (force?: boolean) => Promise<DeliveryLocation | null>
   getStoreDistanceKm: (store: Restaurant) => number
   getStoreDeliveryFee: (store: Restaurant) => string
   getStoreDeliveryTime: (store: Restaurant) => string
@@ -131,6 +133,10 @@ export type PlacedOrder = {
   paymentReference?: string
   paymentStatus?: 'paid' | 'pending' | 'cash_on_pickup'
   deliveryOtp?: string
+  pickupAddress?: string
+  pickupCoords?: { lat: number; lng: number }
+  dropoffAddress?: string
+  dropoffCoords?: { lat: number; lng: number }
 }
 
 type Carts = Record<string, CartLine[]>
@@ -166,6 +172,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   const [campusId, setCampusId] = useState(campuses[0].id)
   const [customLocationLabel, setCustomLocationLabel] = useState<string | null>(null)
   const [userLocation, setUserLocationState] = useState<DeliveryLocation | null>(null)
+  const userLocationRef = useRef<DeliveryLocation | null>(null)
+  const manualSelectionVersionRef = useRef(0)
   const [recentLocations, setRecentLocations] = useState<DeliveryLocation[]>([])
   const [isLocatingGps, setIsLocatingGps] = useState(true)
   const [locationError, setLocationError] = useState<string | null>(null)
@@ -195,7 +203,11 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     })
   }
 
-  const setUserLocation = (loc: DeliveryLocation | null) => {
+  const setUserLocation = (loc: DeliveryLocation | null, isAutoGps = false) => {
+    if (!isAutoGps) {
+      manualSelectionVersionRef.current += 1
+    }
+    userLocationRef.current = loc
     setUserLocationState(loc)
     setLocationError(null)
     setCustomLocationLabel(loc ? loc.label : null)
@@ -209,16 +221,21 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     } catch (_e) {}
   }
 
-  const detectUserLocation = async (): Promise<DeliveryLocation | null> => {
+  const detectUserLocation = async (force = false): Promise<DeliveryLocation | null> => {
     if (typeof window === 'undefined') {
       return null
     }
+    const startVersion = manualSelectionVersionRef.current
     setIsLocatingGps(true)
     setLocationError(null)
     try {
       const resolved = await detectAccurateUserLocation()
+      // Never overwrite a location the user manually selected while GPS was resolving
+      if (!force && (manualSelectionVersionRef.current !== startVersion || userLocationRef.current !== null)) {
+        return userLocationRef.current
+      }
       if (resolved) {
-        setUserLocation(resolved)
+        setUserLocation(resolved, !force)
         return resolved
       } else {
         setLocationError(
@@ -237,13 +254,14 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     }
   }
 
-  // Hydrate location, carts and active order from storage on mount
+  // Hydrate location, carts and active order from storage on mount (per-key isolated try/catch - LOC-014)
   useEffect(() => {
     try {
-      // Remove any legacy fake fallback keys
       localStorage.removeItem('dash_delivery_location')
       localStorage.removeItem('dash_selected_radius')
+    } catch {}
 
+    try {
       const savedRecents = localStorage.getItem('dash_recent_locations')
       if (savedRecents) {
         const parsedRecents = JSON.parse(savedRecents)
@@ -256,7 +274,11 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           )
         }
       }
+    } catch (e) {
+      console.warn('Recent locations hydration notice:', e)
+    }
 
+    try {
       const savedLoc = localStorage.getItem('dash_live_location')
       if (savedLoc) {
         const parsed = JSON.parse(savedLoc)
@@ -266,20 +288,29 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           Number.isFinite(parsed.coords.lat) &&
           Number.isFinite(parsed.coords.lng)
         ) {
+          userLocationRef.current = parsed
           setUserLocationState(parsed)
           setCustomLocationLabel(parsed.label)
           setIsLocatingGps(false)
 
-          // Auto-heal if previous session saved raw coordinates instead of a street/suburb name
           if (typeof parsed.label === 'string' && /^-?\d+\.\d+,\s*-?\d+\.\d+$/.test(parsed.label.trim())) {
+            const healVersion = manualSelectionVersionRef.current
             reverseGeocodeCoords(parsed.coords.lat, parsed.coords.lng)
               .then((resolved) => {
-                if (resolved && resolved.label && !/^-?\d+\.\d+,\s*-?\d+\.\d+$/.test(resolved.label.trim())) {
-                  setUserLocation({
-                    ...resolved,
-                    isApproximate: parsed.isApproximate,
-                    accuracy: parsed.accuracy,
-                  })
+                if (
+                  manualSelectionVersionRef.current === healVersion &&
+                  resolved &&
+                  resolved.label &&
+                  !/^-?\d+\.\d+,\s*-?\d+\.\d+$/.test(resolved.label.trim())
+                ) {
+                  setUserLocation(
+                    {
+                      ...resolved,
+                      isApproximate: parsed.isApproximate,
+                      accuracy: parsed.accuracy,
+                    },
+                    true
+                  )
                 }
               })
               .catch(() => {})
@@ -290,9 +321,13 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       } else {
         detectUserLocation()
       }
+    } catch (e) {
+      console.warn('Live location hydration notice:', e)
+      detectUserLocation()
+    }
 
+    try {
       const loaded: Carts = {}
-
       const savedCarts = localStorage.getItem('unieats_carts')
       if (savedCarts) {
         const parsed = JSON.parse(savedCarts)
@@ -303,7 +338,6 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           }
         }
       } else {
-        // Migrate old single-cart format
         const oldCart = localStorage.getItem('unieats_cart')
         if (oldCart) {
           for (const l of sanitizeLines(JSON.parse(oldCart))) {
@@ -313,11 +347,28 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         }
       }
       if (Object.keys(loaded).length) setCarts(loaded)
+    } catch (e) {
+      console.warn('Cart hydration notice:', e)
+    }
 
+    try {
       const savedOrder = localStorage.getItem('unieats_active_order')
       if (savedOrder) {
-        setPlacedOrder(JSON.parse(savedOrder))
+        const parsedOrder = JSON.parse(savedOrder)
+        if (isValidPlacedOrder(parsedOrder)) {
+          setPlacedOrder(parsedOrder)
+        } else {
+          localStorage.removeItem('unieats_active_order')
+        }
       }
+    } catch (e) {
+      console.warn('Active order hydration notice:', e)
+      try {
+        localStorage.removeItem('unieats_active_order')
+      } catch {}
+    }
+
+    try {
       const savedScreen = sessionStorage.getItem('unieats_screen') as Screen
       const savedDept = sessionStorage.getItem('dash_department')
       const savedMode = sessionStorage.getItem('dash_home_mode') as HomeMode | null
@@ -333,7 +384,33 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         setScreen(savedScreen)
       }
     } catch (e) {
-      console.warn('Storage hydration notice:', e)
+      console.warn('Session state hydration notice:', e)
+    }
+
+    // Watch live browser geolocation permission changes (LOC-003)
+    let permStatus: PermissionStatus | null = null
+    const handlePermChange = () => {
+      if (!permStatus) return
+      if (permStatus.state === 'denied') {
+        setLocationError('Location permission was revoked. Search and select your delivery address.')
+      } else if (permStatus.state === 'granted') {
+        setLocationError(null)
+        detectUserLocation()
+      }
+    }
+    if (typeof navigator !== 'undefined' && navigator.permissions?.query) {
+      navigator.permissions
+        .query({ name: 'geolocation' })
+        .then((status) => {
+          permStatus = status
+          status.addEventListener('change', handlePermChange)
+        })
+        .catch(() => {})
+    }
+    return () => {
+      if (permStatus) {
+        permStatus.removeEventListener('change', handlePermChange)
+      }
     }
   }, [])
 
@@ -497,17 +574,65 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     }
   }, [currentRestaurants])
 
+  const [roadDistancesByStore, setRoadDistancesByStore] = useState<
+    Record<string, { km: number; isApproximate: boolean }>
+  >({})
+  const lastBatchOriginRef = useRef<{ lat: number; lng: number } | null>(null)
+
+  useEffect(() => {
+    const origin = userLocation?.coords
+    if (!origin || currentRestaurants.length === 0) return
+
+    // ±150m hysteresis buffer (LOC-010): avoid re-fetching batch matrix on GPS jitter
+    if (
+      lastBatchOriginRef.current &&
+      calculateDistanceKm(lastBatchOriginRef.current, origin) <= 0.15 &&
+      Object.keys(roadDistancesByStore).length > 0
+    ) {
+      return
+    }
+
+    const destinations = currentRestaurants.flatMap((store) => {
+      try {
+        const coords = resolveStoreCoords(store)
+        return [{ id: store.id, lat: coords.lat, lng: coords.lng }]
+      } catch {
+        return []
+      }
+    })
+    if (destinations.length === 0) return
+
+    let cancelled = false
+    lastBatchOriginRef.current = origin
+    fetchBatchRoadDistancesKm(origin, destinations).then((map) => {
+      if (!cancelled) {
+        setRoadDistancesByStore(map)
+      }
+    })
+
+    return () => {
+      cancelled = true
+    }
+  }, [userLocation?.coords?.lat, userLocation?.coords?.lng, currentRestaurants])
+
   const getStoreDistanceKm = (store: Restaurant): number => {
     if (!userLocation || !userLocation.coords) return Infinity
-    const coords = resolveStoreCoords(store)
-    return calculateDistanceKm(userLocation.coords, coords)
+    const batched = roadDistancesByStore[store.id]
+    if (batched) return batched.km
+    try {
+      const coords = resolveStoreCoords(store)
+      return Number((calculateDistanceKm(userLocation.coords, coords) * 1.3).toFixed(2))
+    } catch {
+      return Infinity
+    }
   }
 
   const getStoreDeliveryFee = (store: Restaurant): string => {
     const dist = getStoreDistanceKm(store)
     if (!Number.isFinite(dist)) return formatZar(16)
     if (dist > 10) return 'Unavailable (>10km)'
-    return formatZar(getDeliveryFeeByRoadDistance(dist))
+    const feeStr = formatZar(getDeliveryFeeByRoadDistance(dist))
+    return roadDistancesByStore[store.id]?.isApproximate ? `~${feeStr}` : feeStr
   }
 
   const getStoreDeliveryTime = (store: Restaurant): string => {
@@ -684,6 +809,46 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       const deliveryOtp = await generateUniqueOrderOtp()
       const pickupPin = await generateUniqueOrderOtp([deliveryOtp])
 
+      const orderStore = currentRestaurants.find(
+        (r) => r.id === merchantId || r.name === merchantName
+      )
+      const pickupAddress = orderStore?.location?.trim() || merchantName
+      let pickupCoords = orderStore?.coords
+      if (!pickupCoords && orderStore?.location) {
+        try {
+          pickupCoords = (await geocodeStoreAddress(orderStore.location)) ?? resolveStoreCoords(orderStore)
+        } catch {
+          try {
+            pickupCoords = resolveStoreCoords(orderStore)
+          } catch {
+            pickupCoords = undefined
+          }
+        }
+      } else if (!pickupCoords && orderStore) {
+        try {
+          pickupCoords = resolveStoreCoords(orderStore)
+        } catch {
+          pickupCoords = undefined
+        }
+      }
+      let activeLoc = userLocationRef.current ?? userLocation
+      if (!activeLoc && typeof window !== 'undefined') {
+        try {
+          const raw = localStorage.getItem('dash_live_location')
+          if (raw) {
+            const parsed = JSON.parse(raw)
+            if (parsed?.coords && Number.isFinite(parsed.coords.lat) && Number.isFinite(parsed.coords.lng)) {
+              activeLoc = parsed
+            }
+          }
+        } catch {}
+      }
+      const dropoffAddress =
+        activeLoc?.address?.trim() ||
+        activeLoc?.label?.trim() ||
+        campusName
+      const dropoffCoords = activeLoc?.coords
+
       try {
         firestoreDocId = await createOrder({
           orderId: orderDisplayId,
@@ -713,6 +878,10 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           dashPlusApplied: paymentMeta?.dashPlusApplied ?? false,
           batchDispatch: false,
           pickupVerified: false,
+          pickupAddress,
+          ...(pickupCoords ? { pickupCoords } : {}),
+          dropoffAddress,
+          ...(dropoffCoords ? { dropoffCoords } : {}),
         })
       } catch (err: any) {
         if (err?.code !== 'permission-denied') {
@@ -732,6 +901,10 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         paymentReference: paymentMeta?.paymentReference,
         paymentStatus: paymentMeta?.paymentStatus || 'cash_on_pickup',
         deliveryOtp,
+        pickupAddress,
+        pickupCoords,
+        dropoffAddress,
+        dropoffCoords,
       })
 
       // Remove only the cart that was ordered; other store carts stay

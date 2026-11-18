@@ -21,24 +21,193 @@ export function formatZar(amount: number): string {
   return `R${amount.toFixed(2)}`
 }
 
-/** Fetch real road distance in km via /api/distance (NEVER Haversine) */
+const HYSTERESIS_BUFFER_KM = 0.15 // ±150m GPS jitter hysteresis buffer (LOC-010)
+const DISTANCE_CACHE_TTL_MS = 15 * 60 * 1000
+const sessionDistanceCache: Array<{
+  origin: { lat: number; lng: number }
+  destination: { lat: number; lng: number }
+  km: number
+  timestamp: number
+}> = []
+
+export function haversineKm(
+  a: { lat: number; lng: number },
+  b: { lat: number; lng: number }
+): number {
+  const toRad = (deg: number) => (deg * Math.PI) / 180
+  const R = 6371
+  const dLat = toRad(b.lat - a.lat)
+  const dLng = toRad(b.lng - a.lng)
+  const sinDLat = Math.sin(dLat / 2)
+  const sinDLng = Math.sin(dLng / 2)
+  const h =
+    sinDLat * sinDLat +
+    Math.cos(toRad(a.lat)) * Math.cos(toRad(b.lat)) * sinDLng * sinDLng
+  return 2 * R * Math.asin(Math.sqrt(h))
+}
+
+function getHysteresisCachedDistance(
+  origin: { lat: number; lng: number },
+  destination: { lat: number; lng: number }
+): number | null {
+  const now = Date.now()
+  for (let i = sessionDistanceCache.length - 1; i >= 0; i--) {
+    const entry = sessionDistanceCache[i]
+    if (now - entry.timestamp > DISTANCE_CACHE_TTL_MS) {
+      sessionDistanceCache.splice(i, 1)
+      continue
+    }
+    if (
+      haversineKm(entry.origin, origin) <= HYSTERESIS_BUFFER_KM &&
+      haversineKm(entry.destination, destination) <= HYSTERESIS_BUFFER_KM
+    ) {
+      return entry.km
+    }
+  }
+  return null
+}
+
+function setHysteresisCachedDistance(
+  origin: { lat: number; lng: number },
+  destination: { lat: number; lng: number },
+  km: number
+) {
+  if (sessionDistanceCache.length >= 200) {
+    sessionDistanceCache.shift()
+  }
+  sessionDistanceCache.push({ origin, destination, km, timestamp: Date.now() })
+}
+
+/** Fetch real road distance in km via /api/distance, with ±150m hysteresis session cache (NEVER Haversine) */
 export async function fetchRoadDistanceKm(
   origin: { lat: number; lng: number },
   destination: { lat: number; lng: number }
 ): Promise<number> {
-  const res = await fetch('/api/distance', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ origin, destination }),
-  })
-  if (!res.ok) {
-    throw new Error('Unable to calculate road distance.')
+  if (
+    Math.abs(origin.lat - destination.lat) < 0.0001 &&
+    Math.abs(origin.lng - destination.lng) < 0.0001
+  ) {
+    return 0.1
   }
-  const data = await res.json()
-  if (typeof data?.roadDistanceKm !== 'number' || !Number.isFinite(data.roadDistanceKm)) {
-    throw new Error('Invalid road distance returned by Distance Matrix API.')
+
+  const cached = getHysteresisCachedDistance(origin, destination)
+  if (cached !== null) {
+    return cached
   }
-  return data.roadDistanceKm
+
+  // 1. Server-side /api/distance (Google Routes API v2 / Distance Matrix / OSRM / Valhalla)
+  try {
+    const res = await fetch('/api/distance', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ origin, destination }),
+    })
+    if (res.ok) {
+      const data = await res.json()
+      if (typeof data?.roadDistanceKm === 'number' && Number.isFinite(data.roadDistanceKm)) {
+        setHysteresisCachedDistance(origin, destination, data.roadDistanceKm)
+        return data.roadDistanceKm
+      }
+    }
+  } catch {
+    // Fall through to browser-side road routing
+  }
+
+  // 2. Browser-side Google Routes API v2 (carries browser Referer for HTTP-restricted keys)
+  const publicKey = process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY
+  if (publicKey) {
+    try {
+      const routesRes = await fetch(
+        'https://routes.googleapis.com/directions/v2:computeRoutes',
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'X-Goog-Api-Key': publicKey,
+            'X-Goog-FieldMask': 'routes.distanceMeters',
+          },
+          body: JSON.stringify({
+            origin: {
+              location: { latLng: { latitude: origin.lat, longitude: origin.lng } },
+            },
+            destination: {
+              location: { latLng: { latitude: destination.lat, longitude: destination.lng } },
+            },
+            travelMode: 'DRIVE',
+          }),
+        }
+      )
+      if (routesRes.ok) {
+        const data = await routesRes.json()
+        const route = data?.routes?.[0]
+        if (route) {
+          const meters = typeof route.distanceMeters === 'number' ? route.distanceMeters : 0
+          const km = Number((meters / 1000).toFixed(2))
+          setHysteresisCachedDistance(origin, destination, km)
+          return km
+        }
+      }
+    } catch {
+      // Fall through to OSRM
+    }
+  }
+
+  // 3. Browser-side OSRM Road-Network API
+  const osrmRes = await fetch(
+    `https://router.project-osrm.org/route/v1/driving/${origin.lng},${origin.lat};${destination.lng},${destination.lat}?overview=false`
+  )
+  if (osrmRes.ok) {
+    const osrmData = await osrmRes.json()
+    const meters = osrmData?.routes?.[0]?.distance
+    if (typeof meters === 'number' && Number.isFinite(meters)) {
+      const km = Number((meters / 1000).toFixed(2))
+      setHysteresisCachedDistance(origin, destination, km)
+      return km
+    }
+  }
+
+  throw new Error('Unable to calculate road distance.')
+}
+
+/**
+ * Batch Road-Distance Matrix for Store Feed (LOC-007)
+ * Returns exact road distance when available, or Haversine * 1.3 flagged isApproximate: true on failure.
+ */
+export async function fetchBatchRoadDistancesKm(
+  origin: { lat: number; lng: number },
+  destinations: Array<{ id: string; lat: number; lng: number }>
+): Promise<Record<string, { km: number; isApproximate: boolean }>> {
+  const out: Record<string, { km: number; isApproximate: boolean }> = {}
+  if (destinations.length === 0) return out
+
+  try {
+    const res = await fetch('/api/distance', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ origin, destinations }),
+    })
+    if (res.ok) {
+      const data = await res.json()
+      const results = Array.isArray(data?.results) ? data.results : []
+      for (const item of results) {
+        if (item?.id && typeof item.roadDistanceKm === 'number' && Number.isFinite(item.roadDistanceKm)) {
+          out[item.id] = { km: item.roadDistanceKm, isApproximate: false }
+        }
+      }
+    }
+  } catch {
+    // Fall through to approximate Haversine * 1.3 for any missing items
+  }
+
+  for (const dest of destinations) {
+    if (!out[dest.id]) {
+      out[dest.id] = {
+        km: Number((haversineKm(origin, dest) * 1.3).toFixed(2)),
+        isApproximate: true,
+      }
+    }
+  }
+  return out
 }
 
 /**
