@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { isValidSACoord } from '@/lib/coord-validation'
 import { BoundedLruCache, extractRetryAfterSeconds, routeCacheKey } from '@/lib/route-cache'
+import { haversineKm } from '@/lib/dash-engine'
 
 interface LatLng {
   lat: number
@@ -247,23 +248,14 @@ export async function POST(req: NextRequest) {
       return NextResponse.json(outcome.result)
     }
 
-    if (outcome.rateLimitedRetryAfter !== undefined) {
-      return NextResponse.json(
-        {
-          error: 'UPSTREAM_RATE_LIMITED',
-          retryAfterSeconds: outcome.rateLimitedRetryAfter,
-        },
-        {
-          status: 503,
-          headers: { 'Retry-After': String(outcome.rateLimitedRetryAfter) },
-        }
-      )
-    }
-
-    return NextResponse.json(
-      { error: 'Unable to calculate road distance from routing APIs.' },
-      { status: 502 }
-    )
+    // Explicit approximate road-factor fallback so checkout never blocks on external API outage
+    const approxKm = Number((haversineKm(origin, destination) * 1.3).toFixed(2))
+    return NextResponse.json({
+      provider: 'haversine-road-estimate',
+      roadDistanceKm: Math.max(0.1, approxKm),
+      isApproximate: true,
+      rateLimitedRetryAfter: outcome.rateLimitedRetryAfter ?? null,
+    })
   } catch (err) {
     console.error('Road distance API error:', err)
     return NextResponse.json({ error: 'Failed to calculate road distance' }, { status: 500 })

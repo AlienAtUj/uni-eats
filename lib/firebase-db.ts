@@ -300,9 +300,9 @@ const restaurantsFetcher = async (): Promise<Restaurant[]> => {
 
         const isGrocery =
           uData?.storeType === 'grocery' ||
-          firstProd.storeType === 'grocery' ||
-          isGroceryCategory(categoryName) ||
-          isGroceryCategory(storeName)
+          (uData?.storeType !== 'restaurant' &&
+            (firstProd.storeType === 'grocery' ||
+              isGroceryCategory(storeName)))
 
         const synthesizedRestaurant: Restaurant = {
           id: merchantId,
@@ -342,7 +342,7 @@ const restaurantsFetcher = async (): Promise<Restaurant[]> => {
         isGroceryCategory(r.name) ||
         (Array.isArray(r.menu) &&
           r.menu.length > 0 &&
-          r.menu.some((m) => isGroceryCategory(m.section)))
+          r.menu.every((m) => isGroceryCategory(m.section)))
       r.storeType = inferredGrocery ? 'grocery' : 'restaurant'
     }
     if (!r.deliveryFee) {

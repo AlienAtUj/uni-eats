@@ -26,11 +26,12 @@ export async function POST(req: NextRequest) {
     }
 
     const body = await req.json()
-    const { email, amountZar, items, metadata } = body as {
+    const { email, amountZar, items, metadata, feeBreakdown } = body as {
       email?: string
       amountZar?: number
       items?: CheckoutItemInput[]
       metadata?: Record<string, any>
+      feeBreakdown?: { deliveryFeeZar?: number; smallOrderFeeZar?: number }
     }
 
     if (!isValidEmail(email)) {
@@ -42,7 +43,8 @@ export async function POST(req: NextRequest) {
 
     const { amountInCents, amountZar: verifiedAmountZar } = await computeVerifiedOrderTotalCents(
       items,
-      amountZar
+      amountZar,
+      feeBreakdown
     )
 
     if (amountInCents <= 0) {

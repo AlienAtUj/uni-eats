@@ -113,10 +113,12 @@ type Store = {
     smallOrderFeeZar?: number
     dashPlusApplied?: boolean
   }) => Promise<void>
-  // Auth state
+  // Auth & hydration state
   user: User | null
   userRole: UserRole | null
   isAuthLoading: boolean
+  isHydrated: boolean
+  isRestaurantsLoading: boolean
   reloadUserRole: () => Promise<void>
   signOut: () => Promise<void>
 }
@@ -168,6 +170,8 @@ const StoreContext = createContext<Store | null>(null)
 
 export function StoreProvider({ children }: { children: ReactNode }) {
   const [screen, setScreen] = useState<Screen>('home')
+  const [isHydrated, setIsHydrated] = useState(false)
+  const hasHydratedRef = useRef(false)
   const [homeMode, setHomeMode] = useState<HomeMode>('eat')
   const [campusId, setCampusId] = useState(campuses[0].id)
   const [customLocationLabel, setCustomLocationLabel] = useState<string | null>(null)
@@ -371,14 +375,22 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     try {
       const savedScreen = sessionStorage.getItem('unieats_screen') as Screen
       const savedDept = sessionStorage.getItem('dash_department')
+      const savedActiveId = sessionStorage.getItem('dash_active_restaurant')
       const savedMode = sessionStorage.getItem('dash_home_mode') as HomeMode | null
       if (savedMode === 'eat' || savedMode === 'shop') {
         setHomeMode(savedMode)
+      }
+      if (savedActiveId) {
+        setActiveId(savedActiveId)
       }
       if (savedScreen === 'shop-category') {
         if (savedDept) {
           setActiveDepartmentId(savedDept)
           setScreen(savedScreen)
+        }
+      } else if (savedScreen === 'restaurant') {
+        if (savedActiveId) {
+          setScreen('restaurant')
         }
       } else if (savedScreen) {
         setScreen(savedScreen)
@@ -386,6 +398,9 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     } catch (e) {
       console.warn('Session state hydration notice:', e)
     }
+
+    hasHydratedRef.current = true
+    setIsHydrated(true)
 
     // Watch live browser geolocation permission changes (LOC-003)
     let permStatus: PermissionStatus | null = null
@@ -414,8 +429,9 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     }
   }, [])
 
-  // Persist carts to localStorage whenever they change
+  // Persist carts to localStorage whenever they change (guarded until storage hydration completes)
   useEffect(() => {
+    if (!hasHydratedRef.current) return
     try {
       localStorage.setItem('unieats_carts', JSON.stringify(carts))
     } catch (e) {
@@ -423,8 +439,9 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     }
   }, [carts])
 
-  // Persist placedOrder to localStorage whenever it changes
+  // Persist placedOrder to localStorage whenever it changes (guarded until storage hydration completes)
   useEffect(() => {
+    if (!hasHydratedRef.current) return
     try {
       if (placedOrder) {
         localStorage.setItem('unieats_active_order', JSON.stringify(placedOrder))
@@ -445,7 +462,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     }
   }
 
-  const { restaurants: liveRestaurants } = useFirebaseRestaurants()
+  const { restaurants: liveRestaurants, isLoading: isRestaurantsLoading } = useFirebaseRestaurants()
   const currentRestaurants: Restaurant[] = liveRestaurants || []
 
   // Auth state
@@ -629,8 +646,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
 
   const getStoreDeliveryFee = (store: Restaurant): string => {
     const dist = getStoreDistanceKm(store)
-    if (!Number.isFinite(dist)) return formatZar(16)
-    if (dist > 10) return 'Unavailable (>10km)'
+    if (!Number.isFinite(dist)) return formatZar(15)
+    if (dist > 12) return 'Unavailable (>12km)'
     const feeStr = formatZar(getDeliveryFeeByRoadDistance(dist))
     return roadDistancesByStore[store.id]?.isApproximate ? `~${feeStr}` : feeStr
   }
@@ -682,6 +699,9 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     activeRestaurant,
     openRestaurant: (id) => {
       setActiveId(id)
+      try {
+        sessionStorage.setItem('dash_active_restaurant', id)
+      } catch (_e) {}
       handleSetScreen('restaurant')
     },
     goHome: () => handleSetScreen('home'),
@@ -918,6 +938,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     user,
     userRole,
     isAuthLoading,
+    isHydrated,
+    isRestaurantsLoading,
     reloadUserRole,
     signOut: handleSignOut,
   }

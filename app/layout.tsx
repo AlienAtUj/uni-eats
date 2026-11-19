@@ -2,6 +2,7 @@ import { Analytics } from '@vercel/analytics/next'
 import type { Metadata, Viewport } from 'next'
 import { Plus_Jakarta_Sans } from 'next/font/google'
 import { PwaRegister } from '@/components/pwa-register'
+import { ErrorBoundary } from '@/components/error-boundary'
 import './globals.css'
 
 const jakarta = Plus_Jakarta_Sans({
@@ -53,7 +54,7 @@ export default function RootLayout({
       </head>
       <body className="font-sans antialiased">
         <PwaRegister />
-        {children}
+        <ErrorBoundary>{children}</ErrorBoundary>
         {process.env.NODE_ENV === 'production' && <Analytics />}
       </body>
     </html>

@@ -2,7 +2,12 @@ import crypto from 'crypto'
 import { collection, doc, getDoc, getDocs, query, where } from 'firebase/firestore'
 import { db } from './firebase'
 
-export const SERVER_SERVICE_FEE_ZAR = 0.99
+export const SERVER_SERVICE_FEE_ZAR = 4.99
+
+export interface CheckoutFeeBreakdown {
+  deliveryFeeZar?: number
+  smallOrderFeeZar?: number
+}
 
 export interface CheckoutItemInput {
   itemId: string
@@ -48,7 +53,8 @@ export function verifyTimingSafeHash(expectedHex: string, receivedHex: string): 
  */
 export async function computeVerifiedOrderTotalCents(
   items: CheckoutItemInput[] | undefined,
-  fallbackAmountZar?: number
+  fallbackAmountZar?: number,
+  feeBreakdown?: CheckoutFeeBreakdown
 ): Promise<{ amountInCents: number; amountZar: number }> {
   if (!Array.isArray(items) || items.length === 0) {
     if (typeof fallbackAmountZar === 'number' && Number.isFinite(fallbackAmountZar) && fallbackAmountZar > 0) {
@@ -124,7 +130,17 @@ export async function computeVerifiedOrderTotalCents(
   }
 
   const serviceFeeCents = Math.round(SERVER_SERVICE_FEE_ZAR * 100)
-  const amountInCents = subtotalCents + serviceFeeCents
+  const rawDelivery = Number(feeBreakdown?.deliveryFeeZar ?? 0)
+  const deliveryFeeCents =
+    Number.isFinite(rawDelivery) && rawDelivery >= 0 && rawDelivery <= 32
+      ? Math.round(rawDelivery * 100)
+      : 0
+  const rawSmallOrder = Number(feeBreakdown?.smallOrderFeeZar ?? 0)
+  const smallOrderFeeCents =
+    Number.isFinite(rawSmallOrder) && (rawSmallOrder === 0 || rawSmallOrder === 10)
+      ? Math.round(rawSmallOrder * 100)
+      : 0
+  const amountInCents = subtotalCents + deliveryFeeCents + smallOrderFeeCents + serviceFeeCents
 
   return {
     amountInCents,

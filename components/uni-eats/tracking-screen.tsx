@@ -1,13 +1,25 @@
 'use client'
 
+import dynamic from 'next/dynamic'
 import { useEffect, useMemo, useState } from 'react'
 import { restaurants as initialRestaurants } from '@/lib/data'
 import { formatZar } from '@/lib/dash-engine'
 import { formatJohannesburgTime } from '@/lib/coord-validation'
 import { geocodeStoreAddress, resolveStoreCoords, type Coordinates } from '@/lib/location'
 import { useStore } from './store'
-import { OrderTrackingMap } from './order-tracking-map'
 import { BottomSheet } from './sheet'
+
+const OrderTrackingMap = dynamic(
+  () => import('./order-tracking-map').then((m) => m.OrderTrackingMap),
+  {
+    ssr: false,
+    loading: () => (
+      <div className="flex h-80 w-full items-center justify-center bg-[#F4F4F2] text-xs font-semibold text-[#545454]">
+        Loading live route map...
+      </div>
+    ),
+  }
+)
 import {
   CheckIcon,
   ClockIcon,

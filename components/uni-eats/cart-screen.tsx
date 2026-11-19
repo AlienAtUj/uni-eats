@@ -239,7 +239,7 @@ function CartDetail({
   }, [userLocation, restaurant])
 
   const deliveryFee = useMemo(() => {
-    if (roadDistanceKm === null || roadDistanceKm > 10) return 0
+    if (roadDistanceKm === null || roadDistanceKm > 12) return 0
     return getDeliveryFeeByRoadDistance(roadDistanceKm)
   }, [roadDistanceKm])
 

@@ -153,20 +153,27 @@ export async function fetchRoadDistanceKm(
   }
 
   // 3. Browser-side OSRM Road-Network API
-  const osrmRes = await fetch(
-    `https://router.project-osrm.org/route/v1/driving/${origin.lng},${origin.lat};${destination.lng},${destination.lat}?overview=false`
-  )
-  if (osrmRes.ok) {
-    const osrmData = await osrmRes.json()
-    const meters = osrmData?.routes?.[0]?.distance
-    if (typeof meters === 'number' && Number.isFinite(meters)) {
-      const km = Number((meters / 1000).toFixed(2))
-      setHysteresisCachedDistance(origin, destination, km)
-      return km
+  try {
+    const osrmRes = await fetch(
+      `https://router.project-osrm.org/route/v1/driving/${origin.lng},${origin.lat};${destination.lng},${destination.lat}?overview=false`,
+      { signal: AbortSignal.timeout(4500) }
+    )
+    if (osrmRes.ok) {
+      const osrmData = await osrmRes.json()
+      const meters = osrmData?.routes?.[0]?.distance
+      if (typeof meters === 'number' && Number.isFinite(meters)) {
+        const km = Number((meters / 1000).toFixed(2))
+        setHysteresisCachedDistance(origin, destination, km)
+        return km
+      }
     }
+  } catch {
+    // Fall through to road-factor estimate
   }
 
-  throw new Error('Unable to calculate road distance.')
+  const approxKm = Math.max(0.1, Number((haversineKm(origin, destination) * 1.3).toFixed(2)))
+  setHysteresisCachedDistance(origin, destination, approxKm)
+  return approxKm
 }
 
 /**
@@ -213,15 +220,15 @@ export async function fetchBatchRoadDistancesKm(
 /**
  * PART 1.1: Geofencing & Delivery Distance
  * - 0 - 8 km: Standard zone. Allowed.
- * - 8 - 10 km: Extended Zone. REQUIRES minimum basket of R150.
- * - > 10 km: Locked. Throw "Delivery unavailable at this distance (Max 10km)."
+ * - 8 - 12 km: Extended Zone. REQUIRES minimum basket of R150.
+ * - > 12 km: Locked. Throw "Delivery unavailable at this distance (Max 12km)."
  */
 export function validateDeliveryZone(
   roadDistanceKm: number,
   basketSubtotalZar: number
 ): { zone: 'standard' | 'extended' } {
-  if (roadDistanceKm > 10) {
-    throw new Error('Delivery unavailable at this distance (Max 10km).')
+  if (roadDistanceKm > 12) {
+    throw new Error('Delivery unavailable at this distance (Max 12km).')
   }
   if (roadDistanceKm > 8) {
     if (basketSubtotalZar < DASH_EXTENDED_ZONE_MIN_BASKET_ZAR) {
@@ -234,19 +241,21 @@ export function validateDeliveryZone(
 
 /**
  * PART 1.2: Delivery Fee Matrix (Exact Rand Values)
+ * - 0–2 km: R15
+ * - 2–4 km: R18
+ * - 4–6 km: R22
+ * - 6–8 km: R25
+ * - 8–10 km: R28
+ * - 10–12 km: R32
  */
 export function getDeliveryFeeByRoadDistance(roadDistanceKm: number): number {
-  if (roadDistanceKm <= 1) return 16
-  if (roadDistanceKm <= 2) return 18
-  if (roadDistanceKm <= 3) return 21
-  if (roadDistanceKm <= 4) return 23
-  if (roadDistanceKm <= 5) return 26
-  if (roadDistanceKm <= 6) return 29
-  if (roadDistanceKm <= 7) return 32
-  if (roadDistanceKm <= 8) return 35
-  if (roadDistanceKm <= 9) return 39
-  if (roadDistanceKm <= 10) return 43
-  throw new Error('Delivery unavailable at this distance (Max 10km).')
+  if (roadDistanceKm <= 2) return 15
+  if (roadDistanceKm <= 4) return 18
+  if (roadDistanceKm <= 6) return 22
+  if (roadDistanceKm <= 8) return 25
+  if (roadDistanceKm <= 10) return 28
+  if (roadDistanceKm <= 12) return 32
+  throw new Error('Delivery unavailable at this distance (Max 12km).')
 }
 
 /**

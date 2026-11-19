@@ -24,10 +24,11 @@ export async function POST(req: NextRequest) {
     }
 
     const body = await req.json()
-    const { reference, expectedAmountZar, items } = body as {
+    const { reference, expectedAmountZar, items, feeBreakdown } = body as {
       reference?: unknown
       expectedAmountZar?: number
       items?: CheckoutItemInput[]
+      feeBreakdown?: { deliveryFeeZar?: number; smallOrderFeeZar?: number }
     }
 
     if (!isValidPaymentReference(reference)) {
@@ -88,7 +89,8 @@ export async function POST(req: NextRequest) {
     // 5. Recompute authoritative expected amount from Firestore product prices
     const { amountInCents: authoritativeCents } = await computeVerifiedOrderTotalCents(
       items,
-      expectedAmountZar
+      expectedAmountZar,
+      feeBreakdown
     )
     const metadataCents = Number(tx.metadata?.verifiedAmountCents || 0)
     const requiredCents = Math.max(authoritativeCents, metadataCents)

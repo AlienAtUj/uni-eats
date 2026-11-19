@@ -2,7 +2,7 @@
 
 import Image from 'next/image'
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { type MenuItem, type Restaurant } from '@/lib/data'
+import { isGroceryCategory, type MenuItem, type Restaurant } from '@/lib/data'
 import {
   DASH_MARKET_ID,
   DEPARTMENTS,
@@ -75,12 +75,28 @@ export function ShopCategoryScreen() {
   }, [allEntries, isStoreInRange, getStoreDistanceKm, getStoreDeliveryFee, getStoreDeliveryTime])
 
   const mealRestaurants = useMemo(
-    () => inRangeSortedStores.filter((r) => r.storeType !== 'grocery'),
+    () =>
+      inRangeSortedStores.filter(
+        (r) =>
+          r.storeType !== 'grocery' ||
+          (Array.isArray(r.menu) &&
+            r.menu.some(
+              (m) => (m as any).storeType !== 'grocery' && !isGroceryCategory(m.section)
+            ))
+      ),
     [inRangeSortedStores]
   )
 
   const groceryStores = useMemo(
-    () => inRangeSortedStores.filter((r) => r.storeType === 'grocery'),
+    () =>
+      inRangeSortedStores.filter(
+        (r) =>
+          r.storeType === 'grocery' ||
+          (Array.isArray(r.menu) &&
+            r.menu.some(
+              (m) => (m as any).storeType === 'grocery' || isGroceryCategory(m.section)
+            ))
+      ),
     [inRangeSortedStores]
   )
 

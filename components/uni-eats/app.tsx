@@ -58,9 +58,9 @@ function BrandedAuthSplash() {
 }
 
 function Screens() {
-  const { screen, user, userRole, isAuthLoading } = useStore()
+  const { screen, user, userRole, isAuthLoading, isHydrated } = useStore()
 
-  if (isAuthLoading || !user || userRole === 'merchant') {
+  if (!isHydrated || isAuthLoading || !user || userRole === 'merchant') {
     return <BrandedAuthSplash />
   }
 
@@ -92,8 +92,8 @@ export function UniEatsApp() {
 }
 
 function CustomerShell() {
-  const { user, userRole, isAuthLoading } = useStore()
-  const hideNav = isAuthLoading || !user || userRole === 'merchant'
+  const { user, userRole, isAuthLoading, isHydrated } = useStore()
+  const hideNav = !isHydrated || isAuthLoading || !user || userRole === 'merchant'
 
   return (
     <div className="flex h-dvh justify-center bg-[#f3f3f3] md:h-auto md:min-h-dvh md:py-8">

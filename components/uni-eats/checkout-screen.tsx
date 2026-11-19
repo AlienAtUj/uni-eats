@@ -3,7 +3,7 @@
 import { useState, useEffect, useMemo } from 'react'
 import { formatPrice } from '@/lib/data'
 import { useFirebaseRestaurants } from '@/lib/firebase-db'
-import { resolveStoreCoords } from '@/lib/location'
+import { resolveStoreCoords, geocodeStoreAddress } from '@/lib/location'
 import {
   calculateDashCheckout,
   fetchRoadDistanceKm,
@@ -109,32 +109,49 @@ export function CheckoutScreen() {
   const dashStoreType: DashStoreType =
     orderRestaurant?.storeType === 'grocery' ? 'grocery' : 'food'
 
-  // Calculate real Road Distance via Google Maps Distance Matrix / Routes API (NEVER Haversine)
+  // Calculate real Road Distance via Google Maps Distance Matrix / Routes API
   useEffect(() => {
-    if (!userLocation?.coords || !orderRestaurant) return
-    let shopCoords
-    try {
-      shopCoords = resolveStoreCoords(orderRestaurant)
-    } catch (err: any) {
+    if (!userLocation?.coords) {
       setRoadDistanceKm(null)
-      setRoadDistanceError(err?.message || 'Store location coordinates are unavailable.')
+      setRoadDistanceError('Please select your delivery address to calculate delivery distance.')
       return
     }
+    if (!orderRestaurant) return
+
     let cancelled = false
     setRoadDistanceError(null)
-    fetchRoadDistanceKm(shopCoords, userLocation.coords)
-      .then((km) => {
+
+    ;(async () => {
+      let shopCoords
+      try {
+        shopCoords = resolveStoreCoords(orderRestaurant)
+      } catch (err: any) {
+        if (orderRestaurant.location) {
+          shopCoords = await geocodeStoreAddress(orderRestaurant.location)
+        }
+        if (!shopCoords) {
+          if (!cancelled) {
+            setRoadDistanceKm(null)
+            setRoadDistanceError(err?.message || 'Store location coordinates are unavailable.')
+          }
+          return
+        }
+      }
+
+      try {
+        const km = await fetchRoadDistanceKm(shopCoords, userLocation.coords)
         if (!cancelled) {
           setRoadDistanceKm(km)
           setRoadDistanceError(null)
         }
-      })
-      .catch((err: any) => {
+      } catch (err: any) {
         if (!cancelled) {
           setRoadDistanceKm(null)
           setRoadDistanceError(err?.message || 'Unable to calculate road distance.')
         }
-      })
+      }
+    })()
+
     return () => {
       cancelled = true
     }
@@ -283,6 +300,11 @@ export function CheckoutScreen() {
     }
 
     try {
+      const feeBreakdown = {
+        deliveryFeeZar: fulfillmentMode === 'pickup' ? 0 : deliveryFee,
+        smallOrderFeeZar: smallOrderFee,
+      }
+
       // 1. Initialize transaction on server to verify Firestore prices and lock reference
       const initRes = await fetch('/api/paystack/initialize', {
         method: 'POST',
@@ -291,6 +313,7 @@ export function CheckoutScreen() {
           email: customerEmail,
           amountZar: total,
           items: cartPayload,
+          feeBreakdown,
           metadata: orderMetadata,
         }),
       })
@@ -322,6 +345,7 @@ export function CheckoutScreen() {
                   reference: response.reference,
                   expectedAmountZar: initData.amountZar || total,
                   items: cartPayload,
+                  feeBreakdown,
                 }),
               })
 

@@ -4,6 +4,7 @@ import Image from 'next/image'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import {
   formatPrice,
+  isGroceryCategory,
   type MenuItem,
   type Restaurant,
 } from '@/lib/data'
@@ -251,12 +252,28 @@ export function HomeScreen() {
   )
 
   const mealRestaurants = useMemo(
-    () => inRangeStores.filter((r) => r.storeType !== 'grocery'),
+    () =>
+      inRangeStores.filter(
+        (r) =>
+          r.storeType !== 'grocery' ||
+          (Array.isArray(r.menu) &&
+            r.menu.some(
+              (m) => (m as any).storeType !== 'grocery' && !isGroceryCategory(m.section)
+            ))
+      ),
     [inRangeStores]
   )
 
   const groceryStores = useMemo(
-    () => inRangeStores.filter((r) => r.storeType === 'grocery'),
+    () =>
+      inRangeStores.filter(
+        (r) =>
+          r.storeType === 'grocery' ||
+          (Array.isArray(r.menu) &&
+            r.menu.some(
+              (m) => (m as any).storeType === 'grocery' || isGroceryCategory(m.section)
+            ))
+      ),
     [inRangeStores]
   )
 
@@ -1124,6 +1141,7 @@ export function HomeScreen() {
         open={locationSheetOpen}
         onClose={() => setLocationSheetOpen(false)}
         title="Delivery address"
+        fullScreenOnMobile
       >
         <div className="flex flex-col gap-4 py-1 pb-4">
           {/* 1. Live Street & Suburb Search Input */}
@@ -1137,6 +1155,11 @@ export function HomeScreen() {
                 type="text"
                 value={addressSearchQuery}
                 onChange={(e) => setAddressSearchQuery(e.target.value)}
+                onFocus={(e) => {
+                  setTimeout(() => {
+                    e.target.scrollIntoView({ block: 'nearest', behavior: 'smooth' })
+                  }, 120)
+                }}
                 placeholder="Search street address, suburb, building, or city..."
                 className="w-full bg-transparent py-1 text-sm text-foreground outline-none placeholder:text-muted-foreground"
               />
